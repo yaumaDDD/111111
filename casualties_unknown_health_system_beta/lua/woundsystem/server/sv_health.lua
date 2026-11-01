@@ -1466,6 +1466,21 @@ local function CloseDislocationSession(ply, reason)
     net.Send(ply)
 end
 
+-- Z-City SWEP minigames (hg.WoundBridge) use a temporary tool slot (index 6) and a deferred session:
+-- the minigame only measures the player's work, the effect is applied by session.onClose once it was completed.
+local function FinishExternalSession(ply, session, reason)
+    if not session or not session.external then return end
+
+    local inv = PlayerInventory[ply]
+    if inv then inv[6] = nil end
+    if IsValid(ply) then SyncInventoryToClient(ply) end
+
+    if type(session.onClose) == "function" then
+        local ok, err = pcall(session.onClose, ply, session, reason)
+        if not ok then ErrorNoHalt("[WoundSystem] external minigame onClose failed: " .. tostring(err) .. "\n") end
+    end
+end
+
 local function CloseBandageSession(ply, reason)
     local session = Sessions.Bandage[ply]
     if not session then return end
@@ -1475,6 +1490,8 @@ local function CloseBandageSession(ply, reason)
         net.WriteUInt(session.id, 24)
         net.WriteString(reason or "closed")
     net.Send(ply)
+
+    FinishExternalSession(ply, session, reason)
 end
 
 local function SendBandageOpen(ply, session)
@@ -1523,6 +1540,8 @@ local function CloseSyringeSession(ply, reason)
         net.WriteUInt(session.id, 24)
         net.WriteString(reason or "closed")
     net.Send(ply)
+
+    FinishExternalSession(ply, session, reason)
 end
 
 local function SendAedOpen(ply, session)
@@ -4107,6 +4126,15 @@ function SyncInventoryToClient(ply)
                 net.WriteFloat(slot.durability or 0)
             end
         end
+
+        -- temporary slot of a Z-City SWEP minigame (not part of the visible inventory)
+        local temp = inv[6]
+        local hasTemp = istable(temp) and temp.type == "tool"
+        net.WriteBool(hasTemp)
+        if hasTemp then
+            net.WriteString(temp.toolName or "")
+            net.WriteFloat(temp.durability or 0)
+        end
     net.Send(ply)
 end
 
@@ -4123,7 +4151,15 @@ local function NormalizeToolId(toolName)
 end
 
 local function ValidateToolSlot(ply, slotIdx, expectedTool)
-    local slot = GetInventorySlot(ply, slotIdx)
+    local slot
+    if tonumber(slotIdx) == 6 then
+        -- temporary slot of a Z-City SWEP minigame: valid only while its deferred session is open
+        local bs, ss = Sessions.Bandage[ply], Sessions.Syringe[ply]
+        if not ((bs and bs.external) or (ss and ss.external)) then return nil end
+        slot = PlayerInventory[ply] and PlayerInventory[ply][6]
+    else
+        slot = GetInventorySlot(ply, slotIdx)
+    end
     if not slot or slot.type ~= "tool" then return nil end
 
     if expectedTool and NormalizeToolId(slot.toolName) ~= NormalizeToolId(expectedTool) then
@@ -4138,7 +4174,7 @@ local function SetInventorySlot(ply, slotIdx, slot)
 end
 
 local function ConsumeToolDurability(ply, slotIdx, cost)
-    local slot = GetInventorySlot(ply, slotIdx)
+    local slot = (tonumber(slotIdx) == 6) and (PlayerInventory[ply] and PlayerInventory[ply][6]) or GetInventorySlot(ply, slotIdx)
     if not slot or slot.type ~= "tool" then return false end
 
     cost = tonumber(cost) or 0
@@ -4151,7 +4187,7 @@ local function ConsumeToolDurability(ply, slotIdx, cost)
         removeOnDepleted = WoundSystem.Items.ShouldRemoveOnDepleted(slot.toolName)
     end
 
-    if removeOnDepleted and slot.durability <= 0.001 then
+    if (removeOnDepleted or tonumber(slotIdx) == 6) and slot.durability <= 0.001 then
         SetInventorySlot(ply, slotIdx, CreateEmptyInventorySlot())
     end
 
@@ -5260,6 +5296,14 @@ net.Receive("WoundSystem_BandageInput", function(_, ply)
         return
     end
 
+    if session.deferred then
+        -- Z-City SWEP: only measure the work, the effect is applied when the minigame is completed
+        session.deferredUsed = (session.deferredUsed or 0) + durCost
+        session.deferredWrap = (session.deferredWrap or 0) + wrapFraction
+        SendMinigameAck(ply, MINIGAME_ACK_BANDAGE, session)
+        return
+    end
+
     local item = WoundSystem.Items and WoundSystem.Items.Get and WoundSystem.Items.Get(itemId)
     local ctx = BuildMedicalItemContext(ply, item, slotIdx, slot, session.limbId)
     ctx.wrapFraction = wrapFraction
@@ -5421,6 +5465,18 @@ net.Receive("WoundSystem_SyringeInput", function(_, ply)
 
     if not ConsumeToolDurability(ply, slotIdx, durCost) then
         CloseSyringeSession(ply, "no_tool")
+        return
+    end
+
+    if session.deferred then
+        -- Z-City SWEP: only measure the injected amount, the effect is applied when the minigame is completed
+        session.deferredUsed = (session.deferredUsed or 0) + durCost
+        SendSyringeState(ply, session)
+
+        local left = ValidateToolSlot(ply, slotIdx, itemId)
+        if not left or left.durability <= 0.001 then
+            CloseSyringeSession(ply, "empty")
+        end
         return
     end
 
@@ -8852,6 +8908,89 @@ function WoundSystem.Health.ApplyItemToBody(target, itemId, limbId, amount, opts
     SendLimbUpdate(target, limbId, true)
     if SendCardioUpdate then SendCardioUpdate(target) end
     return true, partial and amount or (tonumber(use.consumeDurability) or (item.max or 100))
+end
+
+-----------------------------------------------------------
+-- Z-City integration API: run the real WoundSystem bandage / syringe minigame for something that is not in the
+-- WoundSystem inventory (a Z-City SWEP).
+--
+--   spec.kind     "bandage" | "syringe"
+--   spec.itemId   WoundSystem item that defines the minigame (look, speed, durability per wrap / second)
+--   spec.limbId   limb shown in the minigame
+--   spec.amount   durability (0..item.max) the player can work with
+--   spec.onClose  function(ply, session, reason): session.deferredUsed / session.deferredWrap / session.startAmount
+--                 describe what the player did. NOTHING was applied to anybody - the caller decides (pass / fail).
+-- The item sits in a temporary slot (index 6) while the minigame is open. Returns true when the minigame was opened.
+-----------------------------------------------------------
+function WoundSystem.Health.StartExternalMinigame(ply, spec)
+    if not WoundSystemHealthEnabled() or not IsValid(ply) or not ply:IsPlayer() or not ply:Alive() then return false end
+    if type(spec) ~= "table" then return false end
+
+    local kind = spec.kind
+    local itemId = NormalizeToolId(spec.itemId)
+    local limbId = tostring(spec.limbId or "")
+    if kind ~= "bandage" and kind ~= "syringe" then return false end
+
+    local item = WoundSystem.Items and WoundSystem.Items.Get and WoundSystem.Items.Get(itemId)
+    if not item or not item.use or item.use.minigame ~= kind then return false end
+
+    local profile
+    if kind == "bandage" then profile = Fn.GetBandageProfile(itemId) else profile = GetSyringeProfile(itemId) end
+    if not profile then return false end
+
+    if not PlayerLimbs[ply] then InitPlayer(ply) end
+    if not GetLimbState(ply, limbId) then return false end
+
+    -- one minigame at a time
+    if Sessions.Bandage[ply] and Sessions.Bandage[ply].external then return false end
+    if Sessions.Syringe[ply] and Sessions.Syringe[ply].external then return false end
+    CloseBandageSession(ply, "replaced")
+    CloseSyringeSession(ply, "replaced")
+
+    local maxDur = WoundSystem.Items.GetMax and WoundSystem.Items.GetMax(itemId) or item.max or 100
+    local amount = math.Clamp(tonumber(spec.amount) or maxDur, 0.5, maxDur)
+
+    local inv = GetInventory(ply)
+    inv[6] = WoundSystem.Items.CreateSlot(itemId, amount)
+
+    local session = {
+        limbId = limbId,
+        slotIdx = 6,
+        itemId = itemId,
+        lastInputAt = CurTime(),
+        external = true,
+        deferred = true,
+        deferredUsed = 0,
+        deferredWrap = 0,
+        startAmount = amount,
+        onClose = spec.onClose,
+    }
+
+    SyncInventoryToClient(ply) -- the client minigame reads the item from its inventory mirror
+
+    if kind == "bandage" then
+        session.id = Sessions.NextBandageId
+        session.mode = profile.mode or "gauze"
+        Sessions.NextBandageId = Sessions.NextBandageId + 1
+        if Sessions.NextBandageId > 16000000 then Sessions.NextBandageId = 1 end
+
+        Sessions.Bandage[ply] = session
+        SendBandageOpen(ply, session)
+    else
+        session.id = Sessions.NextSyringeId
+        Sessions.NextSyringeId = Sessions.NextSyringeId + 1
+        if Sessions.NextSyringeId > 16000000 then Sessions.NextSyringeId = 1 end
+
+        Sessions.Syringe[ply] = session
+        SendSyringeOpen(ply, session)
+    end
+
+    return true
+end
+
+function WoundSystem.Health.HasExternalMinigame(ply)
+    local b, s = Sessions.Bandage[ply], Sessions.Syringe[ply]
+    return (b and b.external) or (s and s.external) or false
 end
 
 if util and util.AddNetworkString then

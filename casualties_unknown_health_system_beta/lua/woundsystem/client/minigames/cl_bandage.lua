@@ -180,6 +180,13 @@ local function DestroyOverlay()
 end
 
 local function LocalReset()
+    if MG.externalClicker then
+        MG.externalClicker = false
+        if WoundSystem and WoundSystem.HealthGUI and WoundSystem.HealthGUI.SetScreenClickerOwned and not WoundSystemHealthHUDOpen then
+            WoundSystem.HealthGUI.SetScreenClickerOwned(false, "zcity_swep_bandage_end")
+        end
+    end
+
     MG.active = false
     MG.closing = false
     MG.sessionId = 0
@@ -567,6 +574,10 @@ net.Receive("WoundSystem_BandageOpen", function()
     MG.lastMouseDown = input.IsMouseDown(MOUSE_LEFT)
     MG.lastRightDown = input.IsMouseDown(MOUSE_RIGHT)
     MG.lastEscDown = input.IsKeyDown(KEY_ESCAPE)
+    if incomingSlotIdx == 6 and WoundSystem.HealthGUI and WoundSystem.HealthGUI.SetScreenClickerOwned then
+        MG.externalClicker = true
+        WoundSystem.HealthGUI.SetScreenClickerOwned(true, "zcity_swep_bandage")
+    end
     EnsureOverlay()
     if WoundSystem and WoundSystem.MinigameClip then
         WoundSystem.MinigameClip.MarkOpened(MG)
@@ -584,7 +595,8 @@ hook.Add("Think", "WoundSystem_BandageInput", function()
     if not MG.active then return end
     if not IsValid(MG.overlay) then EnsureOverlay() end
 
-    if WoundSystemHealthHUDOpen == false then
+    -- slot 6 = minigame started by a Z-City SWEP: it does not need the health HUD
+    if WoundSystemHealthHUDOpen == false and MG.slotIdx ~= 6 then
         MG.RequestClose("hud_closed")
         return
     end

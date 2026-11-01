@@ -1659,6 +1659,13 @@ net.Receive("WoundSystem_SyncInventory", function()
             ApplySyncedInventorySlot(i, kind)
         end
     end
+
+    -- temporary slot of a Z-City SWEP minigame (index 6, never drawn in the inventory)
+    if net.ReadBool() then
+        ApplySyncedInventorySlot(6, 1, net.ReadString(), net.ReadFloat())
+    else
+        WoundSystemInventorySlots[6] = nil
+    end
 end)
 
 local function RequestInventoryMove(fromIdx, toIdx, op)

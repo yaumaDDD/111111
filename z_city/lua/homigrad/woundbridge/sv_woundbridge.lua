@@ -24,6 +24,10 @@ WB.cvCollisionScale = WB.cvCollisionScale or (ConVarExists("zcity_wounds_collisi
 	or CreateConVar("zcity_wounds_collision_scale", "0.6", FCVAR_ARCHIVE,
 		"Multiplier for ragdoll collision damage forwarded to WoundSystem", 0, 20))
 
+WB.cvMinigame = WB.cvMinigame or (ConVarExists("zc_woundsystem_minigames") and GetConVar("zc_woundsystem_minigames")
+	or CreateConVar("zc_woundsystem_minigames", "1", FCVAR_ARCHIVE,
+		"1 = Z-City medical SWEPs open the WoundSystem minigame (bandage / syringe), the effect is applied only after it was completed", 0, 1))
+
 WB.cvDebug = WB.cvDebug or (ConVarExists("zc_woundsystem_bridge_debug") and GetConVar("zc_woundsystem_bridge_debug")
 	or CreateConVar("zc_woundsystem_bridge_debug", "0", FCVAR_ARCHIVE, "Print bridge debug output", 0, 1))
 
@@ -592,34 +596,34 @@ local function Garbage(...)
 end
 
 WB.SwepSpecs = {
-	weapon_bandage_sh    = {kind = "bandage", item = "GAUZE", rate = 25, hold = 10, delete = true},
-	weapon_bigbandage_sh = {kind = "bandage", item = "STERILIZEDBANDAGE", rate = 25, hold = 10, delete = true},
+	weapon_bandage_sh    = {kind = "bandage", item = "GAUZE", rate = 25, hold = 10, delete = true, mg = {kind = "bandage"}},
+	weapon_bigbandage_sh = {kind = "bandage", item = "STERILIZEDBANDAGE", rate = 25, hold = 10, delete = true, mg = {kind = "bandage"}},
 	weapon_tourniquet    = {kind = "apply", item = "TOURNIQUET", hold = 10, delete = true, pick = "extremity"},
 	weapon_needle        = {kind = "apply", item = "INJECTION", hold = 4, delete = true, limb = "thorax",
-		garbage = Garbage(nil, nil, nil, nil, "2211")},
-	weapon_morphine      = {kind = "syringe", item = "MORPHINE", rate = 0.5, holdSet = 50},
-	weapon_fentanyl      = {kind = "syringe", item = "FENTANYL", rate = 1, holdSet = 50},
-	weapon_naloxone      = {kind = "syringe", item = "NALOXONE", oneshot = true, hold = 4, delete = true,
+		garbage = Garbage(nil, nil, nil, nil, "2211"), mg = {kind = "syringe", vehicle = "SALINE"}},
+	weapon_morphine      = {kind = "syringe", item = "MORPHINE", rate = 0.5, holdSet = 50, mg = {kind = "syringe"}},
+	weapon_fentanyl      = {kind = "syringe", item = "FENTANYL", rate = 1, holdSet = 50, mg = {kind = "syringe"}},
+	weapon_naloxone      = {kind = "syringe", item = "NALOXONE", oneshot = true, hold = 4, delete = true, mg = {kind = "syringe"},
 		garbage = Garbage("models/bloocobalt/l4d/items/w_eq_adrenaline.mdl", nil, nil, nil, "2211")},
 	weapon_painkillers   = {kind = "syringe", item = "MORPHINE", oneshot = true, fraction = 0.25, hold = 4, delete = true,
 		garbage = Garbage(nil, nil, "snd_jack_hmcd_foodbounce.wav")},
-	weapon_adrenaline    = {kind = "body", fn = AdrenalineFn, hold = 4, delete = true,
+	weapon_adrenaline    = {kind = "body", fn = AdrenalineFn, hold = 4, delete = true, mg = {kind = "syringe", vehicle = "SALINE"},
 		garbage = Garbage("models/bloocobalt/l4d/items/w_eq_adrenaline.mdl", nil, nil, nil, "2211")},
-	weapon_betablock     = {kind = "body", fn = BetablockFn, hold = 4, delete = true,
+	weapon_betablock     = {kind = "body", fn = BetablockFn, hold = 4, delete = true, mg = {kind = "syringe", vehicle = "SALINE"},
 		garbage = Garbage(nil, nil, "snd_jack_hmcd_foodbounce.wav")},
-	weapon_mannitol      = {kind = "body", fn = MannitolFn, hold = 4, delete = true,
+	weapon_mannitol      = {kind = "body", fn = MannitolFn, hold = 4, delete = true, mg = {kind = "syringe", vehicle = "SALINE"},
 		garbage = Garbage("models/bloocobalt/l4d/items/w_eq_adrenaline.mdl", nil, nil, nil, "2211")},
-	weapon_thiamine      = {kind = "body", fn = ThiamineFn, hold = 4, delete = true,
+	weapon_thiamine      = {kind = "body", fn = ThiamineFn, hold = 4, delete = true, mg = {kind = "syringe", vehicle = "SALINE"},
 		garbage = Garbage(nil, nil, "snd_jack_hmcd_foodbounce.wav")},
 }
 
 -- weapon_medkit_sh: per-mode specs (self.mode)
 WB.MedkitModes = {
-	[1] = {kind = "bandage", item = "GAUZE", rate = 25},
-	[2] = {kind = "syringe", item = "MORPHINE", oneshot = true, fraction = 0.3},
-	[3] = {kind = "syringe", item = "BLOODCOAGULANT", oneshot = true},
+	[1] = {kind = "bandage", item = "GAUZE", rate = 25, mg = {kind = "bandage"}},
+	[2] = {kind = "syringe", item = "MORPHINE", oneshot = true, fraction = 0.3, mg = {kind = "syringe"}},
+	[3] = {kind = "syringe", item = "BLOODCOAGULANT", oneshot = true, mg = {kind = "syringe", vehicle = "SALINE"}},
 	[4] = {kind = "apply", item = "TOURNIQUET", pick = "extremity"},
-	[5] = {kind = "apply", item = "INJECTION", limb = "thorax"},
+	[5] = {kind = "apply", item = "INJECTION", limb = "thorax", mg = {kind = "syringe", vehicle = "SALINE"}},
 }
 
 local EXTREMITY = {
@@ -715,6 +719,125 @@ local function Consume(swep, idx, amount)
 	swep.modeValues[idx] = left > 0.0005 and left or 0 -- no float dust: the item must really become empty
 end
 
+-- unit conversion helper: Z-City item amount (modeValues) of a full item
+local function DefOf(swep, idx, fallback)
+	local d = swep.modeValuesdef and swep.modeValuesdef[idx]
+	if istable(d) then d = d[1] end
+	return tonumber(d) or fallback
+end
+
+-- the item (and what is left of the Z-City item) after a finished use: remove empty one-shots / medkits
+local function AfterUse(swep, spec, idx)
+	if spec.delete or swep:GetClass() == "weapon_medkit_sh" then
+		local empty = true
+		for i = 1, 5 do
+			if swep:GetClass() ~= "weapon_medkit_sh" and i > 1 then break end
+			if Remaining(swep, i) > 0 then empty = false break end
+		end
+
+		if swep:GetClass() == "weapon_medkit_sh" then
+			if empty and swep.ShouldDeleteOnFullUse then Finish(swep, {}) end
+		elseif empty then
+			Finish(swep, spec)
+		end
+	end
+end
+
+--[[
+	Minigame use.  The WoundSystem bandage / syringe minigame opens on the user's screen (WoundSystem.Health.StartExternalMinigame);
+	it only measures what the player did. The effect is applied to the TARGET after the minigame was completed:
+	  bandage  at least one full wrap (or the whole bandage used)
+	  syringe  the plunger pushed through (>= 90% of the dose)
+	Closing it early / a broken needle / timeout = nothing is applied and nothing is used up.
+]]
+local function StartMinigame(swep, spec, idx, target, limbId)
+	local H = Health()
+	local owner = swep:GetOwner()
+	if not (IsValid(owner) and owner:IsPlayer() and owner:Alive()) then return nil end
+	if not (H.StartExternalMinigame and H.HasExternalMinigame) then return nil end
+
+	if H.HasExternalMinigame(owner) then return true end -- already running
+	if (swep._wbMgCooldown or 0) > CurTime() then return true end
+
+	local mg = spec.mg
+	local item = mg.vehicle or spec.item
+	local def = DefOf(swep, idx, 1)
+	local remaining = Remaining(swep, idx)
+	local maxDur = (WoundSystem.Items and WoundSystem.Items.GetMax and WoundSystem.Items.GetMax(item)) or 100
+
+	local amount
+	if mg.kind == "bandage" then
+		amount = remaining / math.max(def, 0.0001) * maxDur
+	elseif spec.oneshot or mg.vehicle or spec.kind == "apply" or spec.kind == "body" then
+		amount = maxDur * (spec.fraction or 1) -- one dose
+	else
+		amount = remaining / math.max(def, 0.0001) * maxDur
+	end
+
+	local started = H.StartExternalMinigame(owner, {
+		kind = mg.kind,
+		itemId = item,
+		limbId = limbId,
+		amount = amount,
+		onClose = function(ply, session, reason)
+			swep._wbMgCooldown = CurTime() + 0.6
+
+			-- the minigame was interrupted from outside (death, respawn, needle broke...): it is not a pass
+			if reason == "dead" or reason == "respawn" or reason == "disabled" or reason == "needle_break"
+				or reason == "invalid_limb" or reason == "replaced" then
+				return
+			end
+
+			local used, start = session.deferredUsed or 0, session.startAmount or 0
+			local passed
+			if mg.kind == "bandage" then
+				passed = (session.deferredWrap or 0) >= 1 or used >= start - 0.05
+			else
+				passed = used >= start * 0.9
+			end
+
+			if used <= 0 or not passed then
+				if IsValid(ply) then ply:PrintMessage(HUD_PRINTCENTER, "Not completed - nothing was applied") end
+				return
+			end
+
+			if not WB.IsBridged(target) then return end
+
+			local ok
+			if spec.kind == "body" then
+				local body = WB.GetBody(target)
+				if body then
+					spec.fn(target, body, 1)
+					if H.SendCardioUpdate then H.SendCardioUpdate(target) end
+					ok = true
+				end
+			elseif spec.kind == "apply" or mg.vehicle then
+				ok = H.ApplyItemToBody(target, spec.item, limbId, 100)
+			elseif spec.oneshot then
+				ok = H.ApplyItemToBody(target, spec.item, limbId, start)
+			else
+				ok = H.ApplyItemToBody(target, spec.item, limbId, used)
+			end
+
+			if not ok then return end
+
+			if IsValid(swep) then
+				local oneDose = spec.oneshot or mg.vehicle or spec.kind == "apply" or spec.kind == "body"
+				if oneDose then
+					swep.modeValues[idx] = 0
+				else
+					Consume(swep, idx, used / math.max(maxDur, 1) * def)
+				end
+
+				AfterUse(swep, spec, idx)
+			end
+		end,
+	})
+
+	if started then return true end
+	return nil -- could not open (limb gone, ...): use the instant application
+end
+
 function WB.SwepHeal(swep, ent, mode, bone)
 	if not WB.IsEnabled() or not IsValid(ent) then return end
 
@@ -749,6 +872,22 @@ function WB.SwepHeal(swep, ent, mode, bone)
 
 	local aimed = (not self_use) and AimedLimb(swep, target) or nil
 	local done = false
+
+	-- WoundSystem minigame (bandage / syringe) instead of an instant effect
+	if spec.mg and WB.cvMinigame:GetBool() then
+		local limbId
+		if spec.kind == "bandage" or spec.kind == "apply" then
+			limbId = BestLimb(target, spec, aimed)
+			if not limbId and spec.kind == "apply" and not spec.limb and spec.pick ~= "extremity" then limbId = "thorax" end
+		else
+			limbId = BestLimb(target, spec, aimed)
+		end
+
+		if not limbId then return false end -- nothing to treat
+
+		local started = StartMinigame(swep, spec, idx, target, limbId)
+		if started ~= nil then return false end
+	end
 
 	if spec.kind == "bandage" then
 		local limbId = BestLimb(target, spec, aimed)
@@ -822,19 +961,7 @@ function WB.SwepHeal(swep, ent, mode, bone)
 	if not done then return false end
 
 	-- one-shot items vanish when used up
-	if spec.delete or swep:GetClass() == "weapon_medkit_sh" then
-		local empty = true
-		for i = 1, 5 do
-			if swep:GetClass() ~= "weapon_medkit_sh" and i > 1 then break end
-			if Remaining(swep, i) > 0 then empty = false break end
-		end
-
-		if swep:GetClass() == "weapon_medkit_sh" then
-			if empty and swep.ShouldDeleteOnFullUse then Finish(swep, {}) end
-		elseif empty then
-			Finish(swep, spec)
-		end
-	end
+	AfterUse(swep, spec, idx)
 
 	return true
 end
