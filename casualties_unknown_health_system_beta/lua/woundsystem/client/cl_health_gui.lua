@@ -2325,9 +2325,37 @@ hook.Add("Think", "ToggleHUDInput", function()
 
     if GUIState.hudOpen and not WoundSystem.HealthGUI.IsExternalMenuOpen() then
         WoundSystem.HealthGUI.SetScreenClickerOwned(true, "hud_open_hold")
-    elseif not DeathScreen.isDead and not (WoundSystemWorldDrag and WoundSystemWorldDrag.active) then
+    elseif not DeathScreen.isDead and not (WoundSystemWorldDrag and WoundSystemWorldDrag.active)
+        and not (WoundSystemIsAnyWoundMinigameActive and WoundSystemIsAnyWoundMinigameActive()) then
+        -- (a minigame started by a Z-City SWEP owns the cursor without the health HUD being open)
         WoundSystem.HealthGUI.SetScreenClickerOwned(false, "hud_closed_hold")
     end
+end)
+
+-- A minigame started by a Z-City SWEP (temporary slot 6) takes over the controls: no walking, jumping, shooting or
+-- weapon switching while it is open (the server enforces the same in sv_health.lua).
+hook.Add("StartCommand", "WoundSystem_ExternalMinigameControls", function(ply, cmd)
+    if ply ~= LocalPlayer() then return end
+
+    local b, s = WoundSystemBandageMinigame, WoundSystemSyringeMinigame
+    local active = (b and b.IsActive and b.IsActive() and b.slotIdx == 6)
+        or (s and s.IsActive and s.IsActive() and s.slotIdx == 6)
+    if not active then
+        WoundSystem.ExternalMinigameViewAng = nil
+        return
+    end
+
+    -- the view stays where it was (the cursor is used for the minigame)
+    WoundSystem.ExternalMinigameViewAng = WoundSystem.ExternalMinigameViewAng or cmd:GetViewAngles()
+    cmd:SetViewAngles(WoundSystem.ExternalMinigameViewAng)
+    cmd:SetMouseX(0)
+    cmd:SetMouseY(0)
+
+    cmd:ClearMovement()
+    cmd:RemoveKey(bit.bor(IN_ATTACK, IN_ATTACK2, IN_JUMP, IN_DUCK, IN_USE, IN_RELOAD, IN_SPEED, IN_WALK, IN_ZOOM))
+    cmd:SetImpulse(0)
+    cmd:SetWeaponSelect(0)
+    cmd:SetMouseWheel(0)
 end)
 
 function WoundSystem.OpenHealthHUD()

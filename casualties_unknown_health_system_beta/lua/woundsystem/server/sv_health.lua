@@ -1473,7 +1473,10 @@ local function FinishExternalSession(ply, session, reason)
 
     local inv = PlayerInventory[ply]
     if inv then inv[6] = nil end
-    if IsValid(ply) then SyncInventoryToClient(ply) end
+    if IsValid(ply) then
+        SyncInventoryToClient(ply)
+        ply.WoundSystemExtMinigameAttackLock = true -- the mouse button that was used in the minigame must not fire the SWEP again
+    end
 
     if type(session.onClose) == "function" then
         local ok, err = pcall(session.onClose, ply, session, reason)
@@ -9015,6 +9018,28 @@ function WoundSystem.Health.HasExternalMinigame(ply)
     local b, s = Sessions.Bandage[ply], Sessions.Syringe[ply]
     return (b and b.external) or (s and s.external) or false
 end
+
+-- The player is busy with the minigame: no walking, jumping, shooting or weapon switching.
+-- After it closes, attack stays blocked until the mouse button is released (otherwise the SWEP would start it again).
+hook.Add("StartCommand", "WoundSystem_ExternalMinigameControls", function(ply, cmd)
+    if not IsValid(ply) or not ply:IsPlayer() then return end
+
+    if WoundSystem.Health.HasExternalMinigame(ply) then
+        cmd:ClearMovement()
+        cmd:RemoveKey(bit.bor(IN_ATTACK, IN_ATTACK2, IN_JUMP, IN_DUCK, IN_USE, IN_RELOAD, IN_SPEED, IN_WALK, IN_ZOOM))
+        cmd:SetImpulse(0)
+        cmd:SetWeaponSelect(0)
+        return
+    end
+
+    if ply.WoundSystemExtMinigameAttackLock then
+        if cmd:KeyDown(IN_ATTACK) then
+            cmd:RemoveKey(IN_ATTACK)
+        else
+            ply.WoundSystemExtMinigameAttackLock = nil
+        end
+    end
+end)
 
 if util and util.AddNetworkString then
     util.AddNetworkString("WoundSystem_BloodVomit")
