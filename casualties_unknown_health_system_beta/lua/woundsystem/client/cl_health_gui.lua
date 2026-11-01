@@ -809,6 +809,22 @@ if not (WoundSystemAEDMinigame and WoundSystemAEDMinigame._Loaded) and file.Exis
     include("woundsystem/client/minigames/cl_aed.lua")
 end
 
+-- Glass shards live in the Z-City bridge, not in the WoundSystem limb state (no shrapnel field).
+if not (WoundSystemShrapnelMinigame and WoundSystemShrapnelMinigame._Loaded) and file.Exists("woundsystem/client/minigames/cl_shrapnel.lua", "LUA") then
+    include("woundsystem/client/minigames/cl_shrapnel.lua")
+end
+
+WoundSystemGlassShards = WoundSystemGlassShards or {}
+net.Receive("WoundSystem_GlassStatus", function()
+    local shards = {}
+    local count = net.ReadUInt(5)
+    for _ = 1, count do
+        local limbId = net.ReadString()
+        shards[limbId] = net.ReadUInt(4)
+    end
+    WoundSystemGlassShards = shards
+end)
+
 local DynamicFontCache = {}
 
 function WoundSystemGetFont(baseFontName, scale)
@@ -955,7 +971,9 @@ Icons = {
     suicideWound = WoundSystemBloodVariantMaterial("casunknown-images/selfharm/suicideWound.png", "casunknown-images/selfharm/suicideWound.png"),
     limbbleedouter = PaddedMaterial(bottomuiPath .. "limbbleedouter.png"),
     limbbleed = PaddedMaterial(bottomuiPath .. "limbbleed.png"),
-    uiPoint = PaddedMaterial(path .. "screen/uiPoint.png")
+    uiPoint = PaddedMaterial(path .. "screen/uiPoint.png"),
+    -- glass shard sprite (shared with the glass minigame); no shrapnel status icon remains
+    glass = PaddedMaterial("casunknown-images/shrapnelminigame/shrapnelpiece.png")
 }
 
 if cvars and cvars.AddChangeCallback then
@@ -1064,6 +1082,16 @@ WoundSystemLimbUIConfig = {
                 OffsetX = 0,
                 OffsetY = -60,
                 TextOffsetX = -78,
+                TextOffsetY = -20
+            },
+            GLASS = {
+                Text = "REMOVE GLASS",
+                TooltipKey = "removeglass",
+                Width = 180,
+                Height = 60,
+                OffsetX = 0,
+                OffsetY = -60,
+                TextOffsetX = -85,
                 TextOffsetY = -20
             },
             DISLOCATION = {
@@ -1196,7 +1224,8 @@ WoundSystemCasTooltipText = {
     hplimbforce = {"Limb strength", "The limb's total ability to move and exert force"},
     removetourniquet = {"Remove tourniquet", ""},
     removesplint = {"Remove splint", "Take off the splint from the limb"},
-    fixdislocation = {"Fix dislocation", "Try to correct the dislocation by hand"}
+    fixdislocation = {"Fix dislocation", "Try to correct the dislocation by hand"},
+    removeglass = {"Remove glass", "Pull the glass shards out of the limb"}
 }
 
 if WoundSystem.CAS3Locale and WoundSystem.CAS3Locale.ApplyHealthTooltips then
@@ -1753,6 +1782,7 @@ function WoundSystemIsAnyWoundMinigameActive()
         WoundSystemBandageMinigame,
         WoundSystemSyringeMinigame,
         WoundSystemAEDMinigame,
+        WoundSystemShrapnelMinigame,
         WoundSystemSelfHarmMinigame
     }
 
@@ -1802,6 +1832,21 @@ local function RequestDislocationMinigameStart(limbId, slotIdx)
     end
 
     net.Start("WoundSystem_DislocationStart")
+        net.WriteString(limbId)
+        net.WriteUInt(slotIdx or 0, 3)
+    net.SendToServer()
+end
+
+-- Glass shards: the session is owned by the Z-City bridge (sv_woundbridge.lua)
+local function RequestGlassMinigameStart(limbId, slotIdx)
+    if not limbId or limbId == "" then return end
+
+    if WoundSystemShrapnelMinigame and WoundSystemShrapnelMinigame.RequestStart then
+        WoundSystemShrapnelMinigame.RequestStart(limbId, slotIdx)
+        return
+    end
+
+    net.Start("WoundSystem_GlassStart")
         net.WriteString(limbId)
         net.WriteUInt(slotIdx or 0, 3)
     net.SendToServer()
@@ -2292,9 +2337,10 @@ end)
 hook.Add("StartCommand", "WoundSystem_ExternalMinigameControls", function(ply, cmd)
     if ply ~= LocalPlayer() then return end
 
-    local b, s = WoundSystemBandageMinigame, WoundSystemSyringeMinigame
+    local b, s, g = WoundSystemBandageMinigame, WoundSystemSyringeMinigame, WoundSystemShrapnelMinigame
     local active = (b and b.IsActive and b.IsActive() and b.slotIdx == 6)
         or (s and s.IsActive and s.IsActive() and s.slotIdx == 6)
+        or (g and g.IsActive and g.IsActive() and g.external)
     if not active then
         WoundSystem.ExternalMinigameViewAng = nil
         return
@@ -3711,6 +3757,8 @@ function WoundSystemDrawLimbActionPoint(limbId, state, pointPos, bX, bY, scale, 
         actionStatus = "TOURNIQUET"
     elseif state.customStatuses and state.customStatuses["SPLINTED"] then
         actionStatus = "SPLINTED"
+    elseif (WoundSystemGlassShards[limbId] or 0) > 0 then
+        actionStatus = "GLASS"
     elseif state.dislocated then
         actionStatus = "DISLOCATION"
     end
@@ -3765,6 +3813,8 @@ function WoundSystemDrawLimbActionPoint(limbId, state, pointPos, bX, bY, scale, 
     if hoveringPoint and isClicking and not GUIState.lastMouseState and not minigameActive then
         if actionStatus == "DISLOCATION" then
             RequestDislocationMinigameStart(limbId)
+        elseif actionStatus == "GLASS" then
+            RequestGlassMinigameStart(limbId)
         else
             RequestRemoveLimbStatus(limbId, actionStatus)
         end
@@ -4057,6 +4107,11 @@ hook.Add("HUDPaint", "WoundDollAndPanel", function()
                 end
 
                 AddHudIcon(iconItems, Icons.disinfected, Color(val, val, val, alpha))
+            end
+
+            local glassCount = WoundSystemGlassShards[limb.id] or 0
+            if glassCount > 0 and Icons.glass and not Icons.glass:IsError() then
+                AddHudIcon(iconItems, Icons.glass, Color(150, 205, 235, limbAlpha))
             end
 
             local bleedMat, bleedColor = GetBleedHudIcon(state, limbAlpha)

@@ -43,6 +43,7 @@ Clip.Guides = Clip.Guides or {
     dislocationMinigameGuide = "Hit the bone into the correct spot to correct dislocation.\nUsing a wrench would hurt way less.",
     amputationMinigameGuide = "Saw through the limb to amputate. Make sure to stop the bleeding after.",
     aedMinigameGuide = "Follow the displayed instructions.",
+    glassMinigameGuide = "Pull the glass shards out slowly.\nGoing too fast will hurt.",
     manualDefibMinigameGuide = "Match the charge proportional to how far along the fibrillation cycle your heart is, charge, then shock. Repeat if needed.\nThe recommended estimate (POW.EST) gets more accurate with higher INT.",
     handCrankMinigameGuide = "Grab the handle and rotate it to charge."
 }

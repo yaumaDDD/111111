@@ -16,6 +16,7 @@ local function CorruptUIText(text)
 end
 
 local path = "casunknown-images/aedminigame/"
+-- shared glass-shard sprites (folder name is legacy; no shrapnel mechanic remains)
 local graspHandPath = "casunknown-images/shrapnelminigame/"
 local matPad1 = Material(path .. "aedpad1.png")
 local matPad2 = Material(path .. "aedpad2.png")
@@ -38,7 +39,7 @@ local CFG = {
     ClipBackgroundAlpha = 200,
     ClipBackgroundFadeTime = 0.2,
 
-    -- Hand: same spring/pain logic as shrapnel.
+    -- Hand: same spring/pain logic as the glass shard minigame.
     HandScale = 2,
     HandPivotX = 0.4,
     HandPivotY = 0.1,

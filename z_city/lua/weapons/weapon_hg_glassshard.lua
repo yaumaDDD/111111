@@ -138,6 +138,10 @@ function SWEP:PrimaryAttackAdd(ent, trace)
 		local owner = self:GetOwner()
 
 		hg.organism.AddWoundManual(owner, dmg * 2, vector_origin, angle_zero,"ValveBiped.Bip01_R_Hand", CurTime() + (dmg * 220))
+		-- the shard itself leaves glass in the hand (WoundSystem glass minigame), Z-City damage only
+		if hg.WoundBridge and hg.WoundBridge.GlassCut then
+			hg.WoundBridge.GlassCut(owner, "hand_R", dmg * 2, "glass_shard_swep")
+		end
         owner:Notify("This glass shard is cutting through my hand!..", 30)
 
 		if ent and math.random(1, self:IsEntSoft(ent) and 10 or 5) == 1 then

@@ -60,6 +60,7 @@ local function DrawPivotedUVRect(pivotX, pivotY, localX, localY, w, h, angle, u1
 end
 
 local path = "casunknown-images/syringeminigame/"
+-- legacy sprite filename, shared with the glass shard minigame (no shrapnel mechanic)
 local matBackground = Material(path .. "minigameshrapnel.png")
 local matSyringe = Material(path .. "minigameSyringe.png")
 local matFill = Material(path .. "minigameSyringeFill.png")

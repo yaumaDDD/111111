@@ -7945,7 +7945,7 @@ WoundSystem.Health.RestorePlayerFromUnconsciousRagdoll = RestorePlayerFromUncons
 WoundSystem.Health.Fn = Fn
 WoundSystem.Health.Const = Const
 WoundSystem.Health.RagdollBoneNameToLimb = RagdollBoneNameToLimb
--- Z-City bridge: collisions / falls feed the C:U impact model
+-- Z-City bridge: ragdoll collisions feed the C:U impact model (falls are a mild bruise in the bridge)
 WoundSystem.Health.ProcessImpactDamage = ProcessImpactDamage
 WoundSystem.Health.SendCardioUpdate = function(ply, ...) if SendCardioUpdate then return SendCardioUpdate(ply, ...) end end
 
@@ -8137,7 +8137,11 @@ end
 
 function WoundSystem.Health.HasExternalMinigame(ply)
     local b, s = Sessions.Bandage[ply], Sessions.Syringe[ply]
-    return (b and b.external) or (s and s.external) or false
+    if (b and b.external) or (s and s.external) then return true end
+
+    -- glass shard minigame owned by the Z-City bridge (no inventory slot, no WS session)
+    local WB = hg and hg.WoundBridge
+    return (WB and WB.HasGlassMinigame and WB.HasGlassMinigame(ply)) or false
 end
 
 -- The player is busy with the minigame: no walking, jumping, shooting or weapon switching.

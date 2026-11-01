@@ -438,11 +438,13 @@ hook.Add("EntityTakeDamage", "homigrad-damage", function(ent, dmgInfo)
 	
 	local org = ent.organism
 
-	-- Glass damage to ragdoll...
+	-- Glass damage to the breaker: standard Z-City damage hook. Breaking / punching a glass
+	-- brush leaves a superficial cut and glass shards in the C:U limb that was used.
 	if IsValid(ent) and string.find(ent:GetClass(),"break") and 
-		ent:GetBrushSurfaces() and ent:GetBrushSurfaces()[1] and string.find(ent:GetBrushSurfaces()[1]:GetMaterial():GetName(),"glass") and 
-		IsValid(dmgInfo:GetInflictor()) and dmgInfo:GetInflictor() == dmgInfo:GetAttacker() and dmgInfo:GetInflictor().organism then
-			--hg.organism.AddWoundManual(dmgInfo:GetInflictor(),math.random(15,25),vector_origin,angle_zero,math.random(0,ent:GetBoneCount()),CurTime()) 
+		ent:GetBrushSurfaces() and ent:GetBrushSurfaces()[1] and string.find(ent:GetBrushSurfaces()[1]:GetMaterial():GetName(),"glass") then
+			if hg.WoundBridge and hg.WoundBridge.GlassBreak then
+				hg.WoundBridge.GlassBreak(dmgInfo:GetAttacker(), dmgInfo, ent)
+			end
 	end
 	
 	if ent:GetClass() == "npc_bullseye" then
@@ -1465,12 +1467,13 @@ local function velocityDamage(ent, data)
 	local org = ent.organism
 	if org.godmode then return end
 
-	-- living WoundSystem player in a fake ragdoll: collision damage goes to WoundSystem, the legacy organs stay untouched
+	-- living WoundSystem player in a fake ragdoll: Z-City's own collision DamageInfo is the ONLY
+	-- damage source (speed, |cos|, mass and per-bone multipliers are already inside dmgInfo).
 	if ply and ply:Alive() and ply.FakeRagdoll == ent and hg.WoundBridge and hg.WoundBridge.IsBridged(ply) then
-		-- same filters as above (speed, throttling, mass); the hit itself goes through the C:U impact model
 		local massK = (IsValid(data.HitObject) and not data.HitObject:GetEntity():IsWorld()) and math.min(data.HitObject:GetMass() / 20, 1) or 1
 		local dot = math.abs(data.OurOldVelocity:GetNormalized():Dot(data.HitNormal))
-		hg.WoundBridge.ApplyCollision(ply, speed, dot, massK, att, bonename, hitgroup, (surfaceType and bleedSurfaces[surfaceType]) and surfaceType or nil)
+		hg.WoundBridge.ApplyCollision(ply, dmgInfo, speed, dot, massK, att, bonename, hitgroup,
+			(surfaceType and bleedSurfaces[surfaceType]) and surfaceType or nil)
 		return
 	end
 

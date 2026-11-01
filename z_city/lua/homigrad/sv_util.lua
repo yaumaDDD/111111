@@ -1352,6 +1352,14 @@ end
 	end)
 
 	hook.Add("PostEntityTakeDamage", "GlassShards", function(ent, dmginfo)
+		-- Z-City glass break -> WoundSystem: superficial cut + glass shards in the limb used.
+		-- Separate from the 25% physical shard spawn below, so EVERY break can cut the breaker.
+		if IsValid(ent) and (ent:GetClass() == "func_breakable_surf" or (ent:GetClass() == "func_breakable" and ent:GetMaterialType() == MAT_GLASS)) then
+			if hg.WoundBridge and hg.WoundBridge.GlassBreak then
+				hg.WoundBridge.GlassBreak(dmginfo:GetAttacker(), dmginfo, ent)
+			end
+		end
+
 		if IsValid(ent) and math.random(4) == 2 then
 			if ent:GetClass() == "func_breakable_surf" or (ent:GetClass() == "func_breakable" and ent:GetMaterialType() == MAT_GLASS) then
 				local glass = ents.Create("weapon_hg_glassshard")

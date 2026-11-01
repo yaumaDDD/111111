@@ -31,6 +31,15 @@ WB.cvMinigame = WB.cvMinigame or (ConVarExists("zc_woundsystem_minigames") and G
 WB.cvDebug = WB.cvDebug or (ConVarExists("zc_woundsystem_bridge_debug") and GetConVar("zc_woundsystem_bridge_debug")
 	or CreateConVar("zc_woundsystem_bridge_debug", "0", FCVAR_ARCHIVE, "Print bridge debug output", 0, 1))
 
+-- Glass shards: only Z-City glass damage creates them (the old WoundSystem shrapnel stays removed).
+WB.cvGlass = WB.cvGlass or (ConVarExists("zc_woundsystem_glass") and GetConVar("zc_woundsystem_glass")
+	or CreateConVar("zc_woundsystem_glass", "1", FCVAR_ARCHIVE,
+		"1 = Z-City glass damage leaves superficial cuts and glass shards in a C:U limb", 0, 1))
+
+WB.cvGlassAuto = WB.cvGlassAuto or (ConVarExists("zc_woundsystem_glass_auto") and GetConVar("zc_woundsystem_glass_auto")
+	or CreateConVar("zc_woundsystem_glass_auto", "1", FCVAR_ARCHIVE,
+		"1 = the glass shard minigame opens by itself when shards get into a limb", 0, 1))
+
 local function dbg(...)
 	if WB.cvDebug:GetBool() then print("[ZC<->WoundSystem]", ...) end
 end
@@ -83,7 +92,8 @@ end
 --- Resolve the WoundSystem limb from a Z-City hit (bone name first, hitgroup as the fallback)
 function WB.ResolveLimb(ply, bonename, hitgroup)
 	local H = Health()
-	local limb
+	-- exact Z-City bone -> one of the 16 C:U limbs (arm/forearm/hand, thigh/crus/foot, ...)
+	local limb = WB.BoneToWS and WB.BoneToWS(bonename) or nil
 
 	if bonename and bonename ~= "" and H and H.RagdollBoneNameToLimb then
 		limb = H.RagdollBoneNameToLimb(bonename)
@@ -94,6 +104,42 @@ function WB.ResolveLimb(ply, bonename, hitgroup)
 	end
 
 	return limb
+end
+
+--- C:U limb closest to a world position (standing-player hits / glass breaks), all 16 limbs.
+function WB.NearestLimb(ply, pos, fallback)
+	if not IsValid(ply) or not pos then return fallback end
+	if pos == vector_origin or pos:DistToSqr(ply:GetPos()) > 300 * 300 then return fallback end
+
+	local best, bestDist = nil, math.huge
+	for i = 0, (ply:GetBoneCount() or 1) - 1 do
+		local limb = WB.BoneToWS and WB.BoneToWS(ply:GetBoneName(i)) or nil
+		if limb then
+			local bonePos = ply:GetBonePosition(i)
+			if bonePos then
+				local dist = bonePos:DistToSqr(pos)
+				if dist < bestDist then bestDist, best = dist, limb end
+			end
+		end
+	end
+
+	return best or fallback
+end
+
+--- Lowest bone = the exact C:U limb the player landed on.
+function WB.LowestLimb(ply, fallback)
+	if not IsValid(ply) then return fallback end
+
+	local best, bestZ = nil, math.huge
+	for i = 0, (ply:GetBoneCount() or 1) - 1 do
+		local limb = WB.BoneToWS and WB.BoneToWS(ply:GetBoneName(i)) or nil
+		if limb then
+			local bonePos = ply:GetBonePosition(i)
+			if bonePos and bonePos.z < bestZ then bestZ, best = bonePos.z, limb end
+		end
+	end
+
+	return best or fallback
 end
 
 -----------------------------------------------------------------------------------------------------------------------
@@ -142,6 +188,8 @@ function WB.ApplyDamage(ply, dmgInfo, bonename, hitgroup, rawDamage, onRagdoll)
 			limb = WB.ResolveLimb(ply, bonename, hitgroup)
 		else
 			limb = hitgroup and WB.HitgroupToWS[hitgroup] or nil -- nil: WoundSystem decides (blunt/generic spreads over the body)
+			-- the wound itself lands on the nearest of ALL 16 C:U limbs, not on one coarse zone
+			limb = WB.NearestLimb(ply, dmgInfo:GetDamagePosition(), limb)
 		end
 	end
 
@@ -170,7 +218,12 @@ end
 -- COLLISIONS, FALLS  (Z-City filters/structure, the damage itself is the C:U impact model)
 -----------------------------------------------------------------------------------------------------------------------
 --- Rough surfaces / glass cut the limb that hit them (Z-City: `bleedSurfaces`, 50%)
-function WB.SurfaceCut(ply, limbId, force, surface)
+function WB.SurfaceCut(ply, limbId, force, surface, zcDamage)
+	-- GLASS surfaces give a cut + glass shards; everything else keeps the old cut below.
+	if surface and WB.GlassSurfaces[surface] then
+		return WB.GlassCut(ply, limbId, zcDamage or force, surface)
+	end
+
 	local H = Health()
 	local limbs = WB.GetLimbs(ply)
 	local body = WB.GetBody(ply)
@@ -188,6 +241,66 @@ function WB.SurfaceCut(ply, limbId, force, surface)
 	return true
 end
 
+--- Glass got into a C:U limb: superficial cut (Z-City AddWoundManual semantics) + 1..5 shards.
+--- Damage and the limb both come from Z-City; WoundSystem only stores the result.
+function WB.GlassCut(ply, limbId, zcDamage, source)
+	if not WB.IsBridged(ply) then return false end
+	if WB.cvGlass and not WB.cvGlass:GetBool() then return false end
+
+	local H = Health()
+	local limbs = WB.GetLimbs(ply)
+	if not limbs then return false end
+
+	limbId = limbId or "hand_R"
+	if not limbs[limbId] then
+		limbId = (H.Fn and H.Fn.ResolveLivingLimb and H.Fn.ResolveLivingLimb(ply, limbId)) or "thorax"
+	end
+	local l = limbs[limbId]
+	if not l or l.dismembered then return false end
+
+	local dmg = math.Clamp((tonumber(zcDamage) or 0) * WB.cvDamageScale:GetFloat(), 5, 100)
+	l.skin = math.Clamp((l.skin or 100) - dmg * 0.6, 0, 100)
+	l.bleed = math.Clamp((l.bleed or 0) + dmg * 0.25, 0, 100)
+	if H.Fn and H.Fn.ClearLimbBandage then H.Fn.ClearLimbBandage(l) end
+	if H.SendLimbUpdate then H.SendLimbUpdate(ply, limbId, true) end
+
+	local count = math.Clamp(math.ceil(dmg / 30), 1, 5)
+	if WB.AddGlass then WB.AddGlass(ply, limbId, count) end
+
+	if ply.organism then WB.Sync(ply, ply.organism) end
+	dbg("glass cut", ply, limbId, source, dmg, count)
+	return true
+end
+
+--- Standard Z-City glass break (func_breakable_surf / MAT_GLASS, cs_office windows).
+--- Only close-range breaks count; a bullet through a window from afar puts no glass in the hand.
+function WB.GlassBreak(attacker, dmgInfo, glassEnt)
+	if not WB.IsEnabled() then return false end
+
+	local ply = WB.GetPlayer(attacker)
+	if not ply and dmgInfo then
+		local inf = dmgInfo:GetInflictor()
+		ply = WB.GetPlayer(inf)
+		if not ply and IsValid(inf) and inf.GetOwner then ply = WB.GetPlayer(inf:GetOwner()) end
+	end
+	if not WB.IsBridged(ply) then return false end
+
+	local dmgPos = dmgInfo and dmgInfo:GetDamagePosition() or nil
+	local pos = (dmgPos and dmgPos ~= vector_origin) and dmgPos
+		or (IsValid(glassEnt) and glassEnt.NearestPoint and glassEnt:NearestPoint(ply:GetPos())) or nil
+	if not pos or pos:DistToSqr(ply:GetPos()) > 200 * 200 then return false end
+
+	local now = CurTime()
+	ply._WBGlassBreak = ply._WBGlassBreak or {}
+	local key = IsValid(glassEnt) and glassEnt:EntIndex() or 0
+	if (ply._WBGlassBreak[key] or 0) + 0.6 > now then return false end
+	ply._WBGlassBreak[key] = now
+
+	local zcDamage = math.max((dmgInfo and dmgInfo:GetDamage()) or 10, 10)
+	local limbId = WB.NearestLimb(ply, pos, "hand_R")
+	return WB.GlassCut(ply, limbId, zcDamage, "breakable_glass")
+end
+
 --- Impact force of a ragdoll collision in C:U units (same conversion C:U uses for its own ragdoll: speed * |cos| / 50)
 function WB.ImpactForce(ply, speed, dot, massK)
 	local body = WB.GetBody(ply)
@@ -197,7 +310,7 @@ end
 
 --- One impact on a limb through the C:U impact model (muscle, pain, skin, bleeding, dislocation, fracture, internal bleeding, head).
 --- Returns true when the bridge handled it.
-function WB.ApplyImpact(ply, limbId, force, surface)
+function WB.ApplyImpact(ply, limbId, force, surface, zcDamage)
 	if not WB.IsBridged(ply) then return false end
 
 	local H = Health()
@@ -220,7 +333,7 @@ function WB.ApplyImpact(ply, limbId, force, surface)
 	ply._nextLimbPhysicsDamage[limbId] = now + 0.22
 
 	H.ProcessImpactDamage(ply, limbId, force)
-	if surface then WB.SurfaceCut(ply, limbId, force, surface) end
+	if surface then WB.SurfaceCut(ply, limbId, force, surface, zcDamage) end
 
 	if ply.organism then WB.Sync(ply, ply.organism) end
 	dbg("impact", ply, limbId, force)
@@ -229,13 +342,15 @@ function WB.ApplyImpact(ply, limbId, force, surface)
 end
 
 --- Ragdoll collision (Z-City `velocityDamage`, after its speed / throttling filters).
-function WB.ApplyCollision(ply, speed, dot, massK, attacker, bonename, hitgroup, surface)
+--- `dmgInfo` is Z-City's own DamageInfo: its damage / hitgroup / bone multipliers are the only source.
+function WB.ApplyCollision(ply, dmgInfo, speed, dot, massK, attacker, bonename, hitgroup, surface)
 	if not WB.IsBridged(ply) then return false end
 
 	local limb = WB.ResolveLimb(ply, bonename, hitgroup)
 	if IsValid(attacker) and attacker:IsPlayer() then ply._WBLastCollisionAttacker = attacker end
 
-	return WB.ApplyImpact(ply, limb, WB.ImpactForce(ply, speed, dot, massK), surface)
+	local zcDamage = (dmgInfo and dmgInfo:GetDamage()) or 0
+	return WB.ApplyImpact(ply, limb, WB.ImpactForce(ply, speed, dot, massK), surface, zcDamage)
 end
 
 --- Fall of a standing player (engine DMG_FALL): the C:U fall model (landing speed -> impact force on feet / shins).
@@ -244,7 +359,38 @@ function WB.ApplyFall(ply, dmgInfo)
 	if not WB.IsBridged(ply) then return false end
 	if IsValid(ply.FakeRagdoll) then return true end
 
-	WB.ApplyDamage(ply, dmgInfo, nil, nil, dmgInfo:GetDamage(), false)
+	-- no C:U fall model (it tore skin / caused fractures): only a slight bruise on the landed limb
+	WB.ApplyFallBruise(ply, dmgInfo)
+	return true
+end
+
+--- Mild trauma from a fall, using ONLY Z-City's DMG_FALL damage. No wounds, no bleeding,
+--- no fractures / dislocations / internal bleeding: muscle, pain and a little adrenaline.
+function WB.ApplyFallBruise(ply, dmgInfo)
+	local H = Health()
+	local limbs = WB.GetLimbs(ply)
+	if not limbs then return false end
+
+	local limbId = WB.LowestLimb(ply, nil)
+		or WB.ResolveLimb(ply, nil, ply.LastHitGroup and ply:LastHitGroup() or nil)
+		or "foot_R"
+	if H.Fn and H.Fn.ResolveLivingLimb then limbId = H.Fn.ResolveLivingLimb(ply, limbId) or limbId end
+
+	local l = limbs[limbId]
+	if not l or l.dismembered then return false end
+
+	local zcDamage = math.Clamp((dmgInfo and dmgInfo:GetDamage() or 0) * WB.cvDamageScale:GetFloat(), 0, 100)
+	local bruise = math.Clamp(zcDamage * 0.12, 0, 12)
+
+	l.muscle = math.Clamp((l.muscle or 100) - bruise * 0.6, 0, 100)
+	l.pain = math.Clamp((l.pain or 0) + bruise, 0, 100)
+	local body = WB.GetBody(ply)
+	if body then body.adrenaline = math.Clamp((body.adrenaline or 0) + bruise * 0.15, 0, 100) end
+
+	if H.SendLimbUpdate then H.SendLimbUpdate(ply, limbId, true) end
+	if H.SendCardioUpdate then H.SendCardioUpdate(ply, true) end
+	if ply.organism then WB.Sync(ply, ply.organism) end
+	dbg("fall bruise", ply, limbId, zcDamage, bruise)
 	return true
 end
 
@@ -260,7 +406,7 @@ function WB.AddWoundManual(ent, dmgBlood, bone)
 	local bonename = bone
 	if isnumber(bone) then bonename = ent:GetBoneName(bone) end
 
-	local limbId = H.RagdollBoneNameToLimb and H.RagdollBoneNameToLimb(bonename) or "thorax"
+	local limbId = WB.ResolveLimb(ply, bonename, nil) or "thorax"
 	local limb = limbs[limbId or "thorax"]
 	if limb and not limb.dismembered then
 		limb.bleed = math.Clamp((limb.bleed or 0) + (tonumber(dmgBlood) or 0) * 0.04, 0, 100)
@@ -421,6 +567,7 @@ function WB.ResetOrganism(ent)
 
 	local H = Health()
 	if not (H and H.ResetPlayer) or not H.ResetPlayer(ply) then return false end
+	if WB.ClearGlass then WB.ClearGlass(ply) end
 
 	local org = ply.organism
 	if org then
@@ -1243,3 +1390,479 @@ function WB.SwepHeal(swep, ent, mode, bone)
 
 	return true
 end
+
+-----------------------------------------------------------------------------------------------------------------------
+-- GLASS SHARDS (дополнение): счётчики и сессии мини-игры вытаскивания осколков.
+-- Механики шрапнели здесь нет: нет limb.shrapnel, TWEEZERS, бонусов/штрафов к заживлению,
+-- осколков от пуль, взрывов и сломанной иглы. Стекло приходит только из урона Z-City.
+-- Имена WoundSystem_Shrapnel* ниже — исторические имена сообщений самой мини-игры,
+-- оставлены как есть, чтобы не переписывать восстановленный клиентский файл.
+-----------------------------------------------------------------------------------------------------------------------
+
+for _, name in ipairs({
+	"WoundSystem_ShrapnelOpen",
+	"WoundSystem_ShrapnelState",
+	"WoundSystem_ShrapnelClose",
+	"WoundSystem_ShrapnelStart",
+	"WoundSystem_ShrapnelInput",
+	"WoundSystem_GlassStatus",
+}) do
+	util.AddNetworkString(name)
+end
+
+local Clamp, Rand, Lerp = math.Clamp, math.Rand, Lerp
+
+-----------------------------------------------------------------------------------------------------------------------
+-- state
+-----------------------------------------------------------------------------------------------------------------------
+
+local PIECE_COUNT = 5
+local GLASS = {
+	ExtractY = -60,
+	ReimpaleY = -68,
+	HandStartY = -170,
+	MinY = -364,
+	FreeMaxY = 240,
+	DragSmooth = 0.55,
+	BreakVelY = 2.2,
+	BreakXDist = 42,
+	GrabHalfX = 75,
+	GrabHalfY = 350,
+	InputDelay = 0.05,
+	BasePos = {
+		{ x = -86, y = -214 },
+		{ x = -44, y = -214 },
+		{ x =   0, y = -214 },
+		{ x =  44, y = -214 },
+		{ x =  86, y = -214 },
+	},
+}
+
+WB.GlassShards = WB.GlassShards or setmetatable({}, { __mode = "k" })
+local GlassShards = WB.GlassShards
+
+local Sessions = setmetatable({}, { __mode = "k" })
+local NextSessionId = 1
+local CloseGlassSession
+
+
+local function GlassTable(ply)
+	local t = GlassShards[ply]
+	if not t then
+		t = {}
+		GlassShards[ply] = t
+	end
+	return t
+end
+
+function WB.GetGlass(ply, limbId)
+	local t = GlassShards[ply]
+	return (t and t[limbId]) or 0
+end
+
+--- Full mirror of the shard counters, used by the wound view ("REMOVE GLASS" action point).
+function WB.SendGlassStatus(ply)
+	if not IsValid(ply) then return end
+
+	local t = GlassShards[ply] or {}
+	local limbs = {}
+	for limbId, count in pairs(t) do
+		if count > 0 then limbs[#limbs + 1] = { limbId, Clamp(math.floor(count), 0, PIECE_COUNT) } end
+	end
+
+	net.Start("WoundSystem_GlassStatus")
+		net.WriteUInt(#limbs, 5)
+		for _, entry in ipairs(limbs) do
+			net.WriteString(entry[1])
+			net.WriteUInt(entry[2], 4)
+		end
+	net.Send(ply)
+end
+
+function WB.SetGlass(ply, limbId, count)
+	if not limbId then return end
+	count = Clamp(math.floor(tonumber(count) or 0), 0, PIECE_COUNT)
+	local t = GlassTable(ply)
+	if count <= 0 then t[limbId] = nil else t[limbId] = count end
+	WB.SendGlassStatus(ply)
+	return count
+end
+
+function WB.ClearGlass(ply)
+	GlassShards[ply] = nil
+	local session = Sessions[ply]
+	if session then CloseGlassSession(ply, "cleared") end
+	WB.SendGlassStatus(ply)
+end
+
+function WB.HasGlassMinigame(ply)
+	return Sessions[ply] ~= nil
+end
+
+-----------------------------------------------------------------------------------------------------------------------
+-- session (the C:U shard-pulling physics, trimmed down: no tweezers, no shrapnel field)
+-----------------------------------------------------------------------------------------------------------------------
+
+local function CountRemaining(session)
+	local count = 0
+	for _, piece in ipairs(session.pieces) do
+		if piece.active and piece.embedded ~= false then count = count + 1 end
+	end
+	return count
+end
+
+local function WritePieces(session)
+	for i = 1, PIECE_COUNT do
+		local piece = session.pieces[i]
+		net.WriteFloat(piece.x)
+		net.WriteFloat(piece.y)
+		net.WriteBool(piece.active)
+	end
+end
+
+local function WriteEmbedded(session)
+	for i = 1, PIECE_COUNT do
+		local piece = session.pieces[i]
+		net.WriteBool(piece and piece.embedded ~= false)
+	end
+end
+
+local function BuildGlassSession(limbId, count, external)
+	local session = {
+		id = NextSessionId,
+		limbId = limbId,
+		external = external == true,
+		pieces = {},
+		heldIndex = nil,
+		grabArmed = false,
+		holdSource = nil,
+		holdOffsetX = 0,
+		holdOffsetY = 0,
+		lastInputAt = CurTime() - GLASS.InputDelay,
+		lastAckSeq = 0,
+		lastRemaining = nil,
+	}
+
+	NextSessionId = NextSessionId + 1
+	if NextSessionId > 16000000 then NextSessionId = 1 end
+
+	local activePieces = Clamp(math.floor(count), 0, PIECE_COUNT)
+	local hiddenPieces = PIECE_COUNT - activePieces
+
+	for i = 1, PIECE_COUNT do
+		local base = GLASS.BasePos[i]
+		local angle = Rand(0, math.pi * 2)
+		local radius = math.sqrt(Rand(0, 1)) * 20
+		local piece = {
+			x = base.x + math.cos(angle) * radius,
+			y = base.y + math.sin(angle) * radius,
+			active = true,
+			embedded = true,
+		}
+
+		if i <= hiddenPieces then
+			piece.y = piece.y + 8000
+			piece.active = false
+			piece.embedded = false
+		end
+
+		session.pieces[i] = piece
+	end
+
+	return session
+end
+
+local function SendGlassOpen(ply, session)
+	net.Start("WoundSystem_ShrapnelOpen")
+		net.WriteUInt(session.id, 24)
+		net.WriteString(session.limbId)
+		net.WriteBool(false) -- no tweezers / tool: glass is pulled out by hand
+		WritePieces(session)
+		net.WriteUInt(CountRemaining(session), 4)
+		WriteEmbedded(session)
+		net.WriteUInt(session.lastAckSeq or 0, 24)
+		net.WriteBool(session.external == true)
+	net.Send(ply)
+end
+
+local function SendGlassState(ply, session)
+	net.Start("WoundSystem_ShrapnelState")
+		net.WriteUInt(session.id, 24)
+		WritePieces(session)
+		net.WriteUInt(CountRemaining(session), 4)
+		WriteEmbedded(session)
+		net.WriteUInt(session.lastAckSeq or 0, 24)
+	net.Send(ply)
+end
+
+function CloseGlassSession(ply, reason)
+	local session = Sessions[ply]
+	if not session then return end
+	Sessions[ply] = nil
+
+	net.Start("WoundSystem_ShrapnelClose")
+		net.WriteUInt(session.id, 24)
+		net.WriteString(reason or "closed")
+	net.Send(ply)
+end
+
+--- Open the glass minigame for a limb. `external` = opened by Z-City damage (no health HUD needed).
+function WB.StartGlassMinigame(ply, limbId, external)
+	if not WB.IsBridged(ply) then return false end
+	local H = Health()
+	if not H or not H.GetLimbState then return false end
+	if not limbId or not H.GetLimbState(ply, limbId) then return false end
+	if WB.GetGlass(ply, limbId) <= 0 then return false end
+
+	local existing = Sessions[ply]
+	if existing then
+		if existing.limbId == limbId then
+			SendGlassOpen(ply, existing)
+			return true
+		end
+		return false -- one minigame at a time: the wound view can reopen it later
+	end
+
+	-- never interrupt a Z-City SWEP minigame (bandage / syringe)
+	if external and H.HasExternalMinigame and H.HasExternalMinigame(ply) then return false end
+
+	local session = BuildGlassSession(limbId, WB.GetGlass(ply, limbId), external)
+	session.lastRemaining = CountRemaining(session)
+	Sessions[ply] = session
+	SendGlassOpen(ply, session)
+	dbg("glass open", ply, limbId, session.lastRemaining, external)
+	return true
+end
+
+function WB.AddGlass(ply, limbId, count)
+	if not WB.IsBridged(ply) then return false end
+	count = math.floor(tonumber(count) or 0)
+	if count <= 0 or not limbId then return false end
+
+	local newCount = WB.SetGlass(ply, limbId, WB.GetGlass(ply, limbId) + count)
+
+	local cvAuto = WB.cvGlassAuto or GetConVar("zc_woundsystem_glass_auto")
+	if cvAuto and cvAuto:GetBool() and not Sessions[ply] and not WB.IsMinigameBusy(ply) then
+		WB.StartGlassMinigame(ply, limbId, true)
+	end
+
+	return newCount
+end
+
+--- True when another WoundSystem minigame (or a glass session) owns the player.
+function WB.IsMinigameBusy(ply)
+	local H = Health()
+	return (H and H.HasExternalMinigame and H.HasExternalMinigame(ply)) or Sessions[ply] ~= nil or false
+end
+
+-----------------------------------------------------------------------------------------------------------------------
+-- glass-pulling physics
+-----------------------------------------------------------------------------------------------------------------------
+
+local function BreakGlassGrasp(ply, session)
+	session.heldIndex = nil
+	session.grabArmed = false
+	session.holdSource = nil
+
+	local H = Health()
+	local state = H and H.GetLimbState and H.GetLimbState(ply, session.limbId)
+	if not state then return end
+
+	state.skin = Clamp((state.skin or 100) - Rand(4, 6), 0, 100)
+	state.bleed = Clamp((state.bleed or 0) + Rand(0.4, 1.0), 0, 100)
+	state.pain = Clamp((state.pain or 0) + Rand(9, 16), 0, 100)
+	if H.Fn and H.Fn.ClearLimbBandage then H.Fn.ClearLimbBandage(state) end
+	if H.SendLimbUpdate then H.SendLimbUpdate(ply, session.limbId, true) end
+end
+
+local function ReadOptionalInputSeq()
+	if not net.BytesLeft then return 0 end
+	local bytesLeft, bitsLeft = net.BytesLeft()
+	if (bitsLeft or 0) >= 24 or (bytesLeft or 0) >= 3 then return net.ReadUInt(24) end
+	return 0
+end
+
+net.Receive("WoundSystem_ShrapnelStart", function(_, ply)
+	if not WB.IsBridged(ply) then return end
+
+	local limbId = net.ReadString()
+	local slotIdx = 0
+	if net.BytesLeft then
+		local bytesLeft, bitsLeft = net.BytesLeft()
+		if (bitsLeft or 0) >= 3 or (bytesLeft or 0) >= 1 then slotIdx = net.ReadUInt(3) end
+	end
+
+	WB.StartGlassMinigame(ply, limbId, false)
+end)
+
+net.Receive("WoundSystem_ShrapnelClose", function(_, ply)
+	local session = Sessions[ply]
+	if not session then return end
+
+	local sessionId = net.ReadUInt(24)
+	local reason = net.ReadString()
+	if sessionId ~= session.id then return end
+
+	CloseGlassSession(ply, reason ~= "" and reason or "client_close")
+end)
+
+net.Receive("WoundSystem_ShrapnelInput", function(_, ply)
+	local session = Sessions[ply]
+	if not session then return end
+
+	local sessionId = net.ReadUInt(24)
+	local handX = net.ReadFloat()
+	local handY = net.ReadFloat()
+	local handVelY = net.ReadFloat()
+	local startedClick = net.ReadBool()
+	local holdingClick = net.ReadBool()
+	local stoppedClick = net.ReadBool()
+	local handBaseX, handBaseY = handX, handY
+
+	if net.BytesLeft then
+		local bytesLeft, bitsLeft = net.BytesLeft()
+		if (bitsLeft or 0) >= 64 or (bytesLeft or 0) >= 8 then
+			handBaseX = net.ReadFloat()
+			handBaseY = net.ReadFloat()
+		end
+	end
+	local inputSeq = ReadOptionalInputSeq()
+
+	if sessionId ~= session.id then return end
+	if not IsValid(ply) or not ply:Alive() then
+		CloseGlassSession(ply, "dead")
+		return
+	end
+
+	local now = CurTime()
+	local clickEdge = startedClick or stoppedClick
+	if now - (session.lastInputAt or 0) < GLASS.InputDelay and not clickEdge then return end
+	session.lastInputAt = now
+	session.lastAckSeq = inputSeq
+
+	local H = Health()
+	local state = H and H.GetLimbState and H.GetLimbState(ply, session.limbId)
+	if not state then
+		CloseGlassSession(ply, "invalid_limb")
+		return
+	end
+
+	local clickStartedInPullArea = startedClick
+		and (handY > GLASS.HandStartY or handBaseY > GLASS.HandStartY)
+
+	if clickStartedInPullArea then
+		session.grabArmed = true
+	elseif not holdingClick then
+		session.grabArmed = false
+	end
+
+	-- The hand can lag behind the cursor: allow a held click to latch once the grip/base
+	-- actually reaches a shard.
+	if not session.heldIndex and holdingClick and session.grabArmed then
+		local closestDist, closestIdx = math.huge, nil
+		local closestSource, closestHandX, closestHandY = nil, handX, handY
+		local candidates = {
+			{ x = handX, y = handY, source = "grip" },
+			{ x = handBaseX, y = handBaseY, source = "base" },
+		}
+
+		for idx, piece in ipairs(session.pieces) do
+			if piece.active then
+				for _, candidate in ipairs(candidates) do
+					local dx = math.abs(candidate.x - piece.x)
+					local dy = math.abs(candidate.y - piece.y)
+					if dx <= GLASS.GrabHalfX and dy <= GLASS.GrabHalfY then
+						local dist = dx * dx + dy * dy
+						if dist < closestDist then
+							closestDist = dist
+							closestIdx = idx
+							closestSource = candidate.source
+							closestHandX, closestHandY = candidate.x, candidate.y
+						end
+					end
+				end
+			end
+		end
+
+		if closestIdx then
+			session.heldIndex = closestIdx
+			session.holdSource = closestSource
+			session.holdOffsetX = session.pieces[closestIdx].x - closestHandX
+			session.holdOffsetY = session.pieces[closestIdx].y - closestHandY
+		end
+	end
+
+	local shouldRelease = stoppedClick or (not holdingClick and not startedClick)
+
+	local heldIndex = session.heldIndex
+	if heldIndex and session.pieces[heldIndex] and session.pieces[heldIndex].active then
+		local heldPiece = session.pieces[heldIndex]
+		local dragHandX = session.holdSource == "base" and handBaseX or handX
+		local dragHandY = session.holdSource == "base" and handBaseY or handY
+		local targetX = dragHandX + session.holdOffsetX
+		local targetY = dragHandY + session.holdOffsetY
+
+		if heldPiece.embedded == false then
+			heldPiece.x = Lerp(GLASS.DragSmooth, heldPiece.x, targetX)
+			heldPiece.y = Lerp(GLASS.DragSmooth, heldPiece.y, targetY)
+			heldPiece.y = Clamp(heldPiece.y, GLASS.MinY, GLASS.FreeMaxY)
+			if heldPiece.y <= GLASS.ReimpaleY then heldPiece.embedded = true end
+		else
+			heldPiece.y = Lerp(GLASS.DragSmooth, heldPiece.y, targetY)
+			heldPiece.y = Clamp(heldPiece.y, GLASS.MinY, GLASS.ExtractY)
+			if heldPiece.y >= GLASS.ExtractY then
+				heldPiece.y = GLASS.ExtractY
+				heldPiece.embedded = false
+			end
+
+			-- pulling too fast / sideways tears the skin (no tweezers in this build)
+			if heldPiece.embedded ~= false then
+				if math.abs(handVelY) > GLASS.BreakVelY
+					or math.abs(heldPiece.x - targetX) > GLASS.BreakXDist then
+					BreakGlassGrasp(ply, session)
+					SendGlassState(ply, session)
+					return
+				end
+			end
+		end
+	end
+
+	if shouldRelease then
+		session.heldIndex = nil
+		session.grabArmed = false
+		session.holdSource = nil
+	end
+
+	local remaining = CountRemaining(session)
+	if remaining ~= session.lastRemaining then
+		session.lastRemaining = remaining
+		WB.SetGlass(ply, session.limbId, remaining)
+	end
+
+	if remaining <= 0 and not holdingClick then
+		SendGlassState(ply, session)
+		CloseGlassSession(ply, "complete")
+		return
+	end
+
+	SendGlassState(ply, session)
+end)
+
+-----------------------------------------------------------------------------------------------------------------------
+-- lifecycle
+-----------------------------------------------------------------------------------------------------------------------
+
+hook.Add("PlayerSpawn", "WoundBridge_GlassSpawn", function(ply)
+	GlassShards[ply] = nil
+	CloseGlassSession(ply, "respawn")
+	WB.SendGlassStatus(ply)
+end)
+
+hook.Add("PostPlayerDeath", "WoundBridge_GlassDeath", function(ply)
+	CloseGlassSession(ply, "dead")
+end)
+
+hook.Add("PlayerDisconnected", "WoundBridge_GlassDisconnect", function(ply)
+	GlassShards[ply] = nil
+	Sessions[ply] = nil
+end)

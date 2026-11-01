@@ -48,7 +48,7 @@ WB.WSLimbToZ = {
 	thigh_R = "rleg", crus_R = "rleg", foot_R = "rleg",
 }
 
--- Z-City hitgroup -> WoundSystem limb (fallback when the physics bone can not be resolved)
+-- Z-City hitgroup -> WoundSystem limb (coarse fallback when no bone could be resolved)
 WB.HitgroupToWS = {
 	[HITGROUP_HEAD] = "head",
 	[HITGROUP_CHEST] = "thorax",
@@ -58,3 +58,74 @@ WB.HitgroupToWS = {
 	[HITGROUP_LEFTLEG] = "thigh_L",
 	[HITGROUP_RIGHTLEG] = "thigh_R",
 }
+
+-- Every C:U limb (16), addressed by the exact Z-City / ValveBiped bone name.
+-- Z-City keeps its own hitgroup + bone multipliers; this table only says WHERE the wound lands.
+WB.ZBoneToWS = {
+	["ValveBiped.Bip01_Head1"] = "head",
+	["ValveBiped.Bip01_Neck1"] = "head",
+	["ValveBiped.Bip01_L_UpperArm"] = "arm_L",
+	["ValveBiped.Bip01_L_Forearm"] = "forearm_L",
+	["ValveBiped.Bip01_L_Hand"] = "hand_L",
+	["ValveBiped.Bip01_R_UpperArm"] = "arm_R",
+	["ValveBiped.Bip01_R_Forearm"] = "forearm_R",
+	["ValveBiped.Bip01_R_Hand"] = "hand_R",
+	["ValveBiped.Bip01_L_Thigh"] = "thigh_L",
+	["ValveBiped.Bip01_L_Calf"] = "crus_L",
+	["ValveBiped.Bip01_L_Foot"] = "foot_L",
+	["ValveBiped.Bip01_R_Thigh"] = "thigh_R",
+	["ValveBiped.Bip01_R_Calf"] = "crus_R",
+	["ValveBiped.Bip01_R_Foot"] = "foot_R",
+	["ValveBiped.Bip01_Spine2"] = "thorax",
+	["ValveBiped.Bip01_Spine4"] = "thorax",
+	["ValveBiped.Bip01_Spine"] = "abdomen",
+	["ValveBiped.Bip01_Spine1"] = "abdomen",
+	["ValveBiped.Bip01_Pelvis"] = "abdomen",
+}
+
+-- All C:U limbs, used to iterate / validate glass and surface cuts on any part of the body.
+WB.WSLimbs = {
+	"head", "thorax", "abdomen",
+	"arm_L", "forearm_L", "hand_L",
+	"arm_R", "forearm_R", "hand_R",
+	"thigh_L", "crus_L", "foot_L",
+	"thigh_R", "crus_R", "foot_R",
+}
+
+-- Z-City surface props that mean GLASS (a subset of `bleedSurfaces` in sv_input.lua).
+-- Glass gives a superficial cut AND glass shards; the other rough surfaces only give a cut.
+WB.GlassSurfaces = {
+	["glass"] = true,
+	["glassbottle"] = true,
+	["glassfloor"] = true,
+	["brokenglass"] = true,
+	["glass_breakable"] = true,
+}
+
+--- Exact Z-City bone -> C:U limb (case-insensitive, also accepts "bip01_l_hand" style names).
+function WB.BoneToWS(bonename)
+	if not bonename or bonename == "" then return end
+	local name = string.lower(tostring(bonename))
+
+	local exact = WB.ZBoneToWS[tostring(bonename)]
+	if exact then return exact end
+	for bone, limb in pairs(WB.ZBoneToWS) do
+		if string.lower(bone) == name then return limb end
+	end
+
+	-- ragdoll / non ValveBiped bone naming
+	local patterns = {
+		{ "l_upperarm", "arm_L" }, { "r_upperarm", "arm_R" },
+		{ "l_forearm", "forearm_L" }, { "r_forearm", "forearm_R" },
+		{ "l_hand", "hand_L" }, { "r_hand", "hand_R" },
+		{ "l_thigh", "thigh_L" }, { "r_thigh", "thigh_R" },
+		{ "l_calf", "crus_L" }, { "r_calf", "crus_R" },
+		{ "l_foot", "foot_L" }, { "r_foot", "foot_R" },
+		{ "spine2", "thorax" }, { "spine4", "thorax" },
+		{ "spine1", "abdomen" }, { "pelvis", "abdomen" },
+		{ "head", "head" },
+	}
+	for _, entry in ipairs(patterns) do
+		if string.find(name, entry[1], 1, true) then return entry[2] end
+	end
+end
