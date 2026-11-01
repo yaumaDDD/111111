@@ -265,9 +265,9 @@ function hg.organism.AddWound(ent, tr, bone, dmgInfo, dmgPos, dmgBlood, inputHol
 	end
 end
 
-function hg.organism.AddWoundManual(ent,dmgBlood,localPos,localAng,bone,time)
-	-- living WoundSystem player: the cut becomes WoundSystem bleeding
-	if hg.WoundBridge and hg.WoundBridge.AddWoundManual(ent, dmgBlood, bone) then return end
+function hg.organism.AddWoundManual(ent,dmgBlood,localPos,localAng,bone,time,glass)
+	-- living WoundSystem player: the cut becomes WoundSystem bleeding (glass = broken glass: shards stay in the wound)
+	if hg.WoundBridge and hg.WoundBridge.AddWoundManual(ent, dmgBlood, bone, glass) then return end
 
 	local org = ent.organism
 	if org.superfighter then return end
@@ -456,6 +456,13 @@ hook.Add("EntityTakeDamage", "homigrad-damage", function(ent, dmgInfo)
 	end
 
 	if not org then return end
+
+	-- Fall of a living WoundSystem player: C:U fall model (landing speed -> impact on feet / shins)
+	if dmgInfo:IsFallDamage() and ent:IsPlayer() and hg.WoundBridge and hg.WoundBridge.IsBridged(ent) then
+		if org.godmode then return true end
+		hg.WoundBridge.ApplyFall(ent, dmgInfo)
+		return true
+	end
 
 	if dmgInfo:GetAttacker():GetClass() == "npc_zombie" then
 		--if not org then return end 
@@ -1460,7 +1467,10 @@ local function velocityDamage(ent, data)
 
 	-- living WoundSystem player in a fake ragdoll: collision damage goes to WoundSystem, the legacy organs stay untouched
 	if ply and ply:Alive() and ply.FakeRagdoll == ent and hg.WoundBridge and hg.WoundBridge.IsBridged(ply) then
-		hg.WoundBridge.ApplyCollision(ply, dmgInfo:GetDamage(), att, bonename, hitgroup, data.HitPos, -(data.OurOldVelocity - data.TheirOldVelocity))
+		-- same filters as above (speed, throttling, mass); the hit itself goes through the C:U impact model
+		local massK = (IsValid(data.HitObject) and not data.HitObject:GetEntity():IsWorld()) and math.min(data.HitObject:GetMass() / 20, 1) or 1
+		local dot = math.abs(data.OurOldVelocity:GetNormalized():Dot(data.HitNormal))
+		hg.WoundBridge.ApplyCollision(ply, speed, dot, massK, att, bonename, hitgroup, (surfaceType and bleedSurfaces[surfaceType]) and surfaceType or nil)
 		return
 	end
 

@@ -8416,6 +8416,19 @@ WoundSystem.Health.RestorePlayerFromUnconsciousRagdoll = RestorePlayerFromUncons
 WoundSystem.Health.Fn = Fn
 WoundSystem.Health.Const = Const
 WoundSystem.Health.RagdollBoneNameToLimb = RagdollBoneNameToLimb
+-- Z-City bridge: collisions / falls feed the C:U impact model, glass embeds C:U shrapnel (pulled out with the shrapnel minigame)
+WoundSystem.Health.ProcessImpactDamage = ProcessImpactDamage
+WoundSystem.Health.AddLimbShrapnel = function(ply, limbId, count)
+    local state = PlayerLimbs[ply] and PlayerLimbs[ply][limbId]
+    if not state or state.dismembered then return false end
+
+    for _ = 1, math.max(1, math.floor(tonumber(count) or 1)) do
+        Fn.AddGunshotShrapnel(state, ply)
+    end
+
+    SendLimbUpdate(ply, limbId, true)
+    return true
+end
 WoundSystem.Health.SendCardioUpdate = function(ply, ...) if SendCardioUpdate then return SendCardioUpdate(ply, ...) end end
 
 -- Brand new body and limbs, like after a respawn (used by the Z-City "Reset organism" tool). Inventory is kept.

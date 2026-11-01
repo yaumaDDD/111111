@@ -1660,7 +1660,7 @@ function SWEP:AttackFront(special_attack, rand)
 		Ent:TakeDamageInfo(Dam)
 
 		if glass and Ent:Health() <= 0 then
-			hg.organism.AddWoundManual(owner, math.Rand(50,75) * 0.5, vector_origin, AngleRand(), owner:LookupBone("ValveBiped.Bip01_"..(rand and "R" or "L").."_Hand"), CurTime())
+			hg.organism.AddWoundManual(owner, math.Rand(50,75) * 0.5, vector_origin, AngleRand(), owner:LookupBone("ValveBiped.Bip01_"..(rand and "R" or "L").."_Hand"), CurTime(), true)
 		end
 
 		local Phys = Ent:IsPlayer() and Ent:GetPhysicsObject() or Ent:GetPhysicsObjectNum(physbone or 0)

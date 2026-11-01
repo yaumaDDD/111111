@@ -21,8 +21,8 @@ WB.cvDamageScale = WB.cvDamageScale or (ConVarExists("zc_wound_damage_scale") an
 		"Multiplier for the damage Z-City forwards to WoundSystem (after armor and penetration)", 0, 20))
 
 WB.cvCollisionScale = WB.cvCollisionScale or (ConVarExists("zcity_wounds_collision_scale") and GetConVar("zcity_wounds_collision_scale")
-	or CreateConVar("zcity_wounds_collision_scale", "0.6", FCVAR_ARCHIVE,
-		"Multiplier for ragdoll collision damage forwarded to WoundSystem", 0, 20))
+	or CreateConVar("zcity_wounds_collision_scale", "1", FCVAR_ARCHIVE,
+		"Multiplier for the impact force of ragdoll collisions fed into the WoundSystem impact model", 0, 20))
 
 WB.cvMinigame = WB.cvMinigame or (ConVarExists("zc_woundsystem_minigames") and GetConVar("zc_woundsystem_minigames")
 	or CreateConVar("zc_woundsystem_minigames", "1", FCVAR_ARCHIVE,
@@ -100,6 +100,9 @@ end
 -- DAMAGE
 -----------------------------------------------------------------------------------------------------------------------
 
+local GLASS_SURFACES = {glass = true, glassbottle = true, glassfloor = true, brokenglass = true, glass_breakable = true}
+local GLASS_WEAPONS = {weapon_hg_glassshard = true, weapon_hg_glassshard_taped = true, weapon_hg_bottlebroken = true}
+
 local function CloneDamageInfo(src, damage)
 	local dmg = DamageInfo()
 	dmg:SetDamage(damage)
@@ -158,6 +161,12 @@ function WB.ApplyDamage(ply, dmgInfo, bonename, hitgroup, rawDamage, onRagdoll)
 
 	dbg("damage", ply, limb, damage)
 
+	-- hit with a glass shard / broken bottle: pieces stay in the wound
+	local inf = dmgInfo:GetInflictor()
+	if IsValid(inf) and GLASS_WEAPONS[inf:GetClass()] and not dmgInfo:IsDamageType(DMG_BULLET + DMG_BLAST) and math.random(2) == 1 then
+		WB.AddShards(ply, limb or (hitgroup and WB.HitgroupToWS[hitgroup]) or "thorax", 1)
+	end
+
 	-- make the result visible to Z-City at once (otrub / fake / death are evaluated from the shadow)
 	if ply:Alive() and ply.organism then
 		WB.Sync(ply, ply.organism)
@@ -166,24 +175,101 @@ function WB.ApplyDamage(ply, dmgInfo, bonename, hitgroup, rawDamage, onRagdoll)
 	return true
 end
 
---- Ragdoll collision damage (Z-City `velocityDamage`)
---- `damage` is Z-City's dmg * 20 (already scaled by the bone multiplier)
-function WB.ApplyCollision(ply, damage, attacker, bonename, hitgroup, pos, force)
+-----------------------------------------------------------------------------------------------------------------------
+-- COLLISIONS, FALLS, GLASS  (Z-City filters/structure, the damage itself is the C:U impact model)
+-----------------------------------------------------------------------------------------------------------------------
+--- Embed `count` C:U shrapnel pieces (glass) into a limb: they are pulled out with the C:U shrapnel minigame
+function WB.AddShards(ply, limbId, count)
+	local H = Health()
+	if not (WB.IsBridged(ply) and H and H.AddLimbShrapnel) then return false end
+	return H.AddLimbShrapnel(ply, limbId, count or 1)
+end
+
+--- Rough surfaces / glass cut the limb that hit them (Z-City: `bleedSurfaces`, 50%), glass leaves shards in the wound
+function WB.SurfaceCut(ply, limbId, force, surface)
+	local H = Health()
+	local limbs = WB.GetLimbs(ply)
+	local body = WB.GetBody(ply)
+	local l = limbs and limbs[limbId]
+	if not l or l.dismembered then return false end
+
+	local jump = (body and body.jumpSpeed) or 6.5
+	if force <= jump * 1.2 or math.random(2) ~= 1 then return false end
+
+	l.skin = math.Clamp((l.skin or 100) - force * 0.8, 0, 100)
+	l.bleed = math.Clamp((l.bleed or 0) + force * 0.2, 0, 100)
+	if H.Fn and H.Fn.ClearLimbBandage then H.Fn.ClearLimbBandage(l) end
+	if H.SendLimbUpdate then H.SendLimbUpdate(ply, limbId, true) end
+
+	if GLASS_SURFACES[surface] then
+		WB.AddShards(ply, limbId, force > jump * 3 and 2 or 1)
+	end
+
+	return true
+end
+
+--- Impact force of a ragdoll collision in C:U units (same conversion C:U uses for its own ragdoll: speed * |cos| / 50)
+function WB.ImpactForce(ply, speed, dot, massK)
+	local body = WB.GetBody(ply)
+	local jump = (body and body.jumpSpeed) or 6.5
+	return math.Clamp((speed or 0) * (dot or 1) * (massK or 1) / 50, 0, jump * 7) * WB.cvCollisionScale:GetFloat()
+end
+
+--- One impact on a limb through the C:U impact model (muscle, pain, skin, bleeding, dislocation, fracture, internal bleeding, head).
+--- Returns true when the bridge handled it.
+function WB.ApplyImpact(ply, limbId, force, surface)
 	if not WB.IsBridged(ply) then return false end
 
-	local dmg = DamageInfo()
-	dmg:SetDamage(damage * WB.cvCollisionScale:GetFloat())
-	dmg:SetDamageType(DMG_CRUSH)
-	dmg:SetAttacker(IsValid(attacker) and attacker or game.GetWorld())
-	dmg:SetInflictor(IsValid(attacker) and attacker or game.GetWorld())
-	if pos then dmg:SetDamagePosition(pos) end
-	if force then dmg:SetDamageForce(force) end
+	local H = Health()
+	if not (H and H.ProcessImpactDamage) then return false end
 
-	return WB.ApplyDamage(ply, dmg, bonename, hitgroup, dmg:GetDamage() / math.max(WB.cvDamageScale:GetFloat(), 0.0001), true)
+	local body = WB.GetBody(ply)
+	if not body then return false end
+	if body.isGodMode then return true end
+
+	local jump = body.jumpSpeed or 6.5
+	if force <= jump then return true end
+
+	limbId = limbId or "thorax"
+	if H.Fn and H.Fn.ResolveLivingLimb then limbId = H.Fn.ResolveLivingLimb(ply, limbId) or limbId end
+
+	-- the same per-limb cooldown C:U uses for physics impacts
+	local now = CurTime()
+	ply._nextLimbPhysicsDamage = ply._nextLimbPhysicsDamage or {}
+	if (ply._nextLimbPhysicsDamage[limbId] or 0) > now then return true end
+	ply._nextLimbPhysicsDamage[limbId] = now + 0.22
+
+	H.ProcessImpactDamage(ply, limbId, force)
+	if surface then WB.SurfaceCut(ply, limbId, force, surface) end
+
+	if ply.organism then WB.Sync(ply, ply.organism) end
+	dbg("impact", ply, limbId, force)
+
+	return true
+end
+
+--- Ragdoll collision (Z-City `velocityDamage`, after its speed / throttling filters).
+function WB.ApplyCollision(ply, speed, dot, massK, attacker, bonename, hitgroup, surface)
+	if not WB.IsBridged(ply) then return false end
+
+	local limb = WB.ResolveLimb(ply, bonename, hitgroup)
+	if IsValid(attacker) and attacker:IsPlayer() then ply._WBLastCollisionAttacker = attacker end
+
+	return WB.ApplyImpact(ply, limb, WB.ImpactForce(ply, speed, dot, massK), surface)
+end
+
+--- Fall of a standing player (engine DMG_FALL): the C:U fall model (landing speed -> impact force on feet / shins).
+--- While in the fake ragdoll the landing is already counted by the ragdoll collisions.
+function WB.ApplyFall(ply, dmgInfo)
+	if not WB.IsBridged(ply) then return false end
+	if IsValid(ply.FakeRagdoll) then return true end
+
+	WB.ApplyDamage(ply, dmgInfo, nil, nil, dmgInfo:GetDamage(), false)
+	return true
 end
 
 --- Z-City AddWoundManual (gibs, glass, explosion cuts): turn it into WoundSystem bleeding
-function WB.AddWoundManual(ent, dmgBlood, bone)
+function WB.AddWoundManual(ent, dmgBlood, bone, glass)
 	local ply = WB.GetPlayer(ent)
 	if not WB.IsBridged(ply) then return false end
 
@@ -198,6 +284,11 @@ function WB.AddWoundManual(ent, dmgBlood, bone)
 	local limb = limbs[limbId or "thorax"]
 	if limb and not limb.dismembered then
 		limb.bleed = math.Clamp((limb.bleed or 0) + (tonumber(dmgBlood) or 0) * 0.04, 0, 100)
+		if glass then
+			-- broken glass: a deeper cut and shards left in the wound (pulled out with the C:U shrapnel minigame)
+			limb.skin = math.Clamp((limb.skin or 100) - (tonumber(dmgBlood) or 0) * 0.5, 0, 100)
+			WB.AddShards(ply, limbId or "thorax", math.Clamp(math.floor((tonumber(dmgBlood) or 0) / 25), 1, 3))
+		end
 		if H.SendLimbUpdate then H.SendLimbUpdate(ply, limbId or "thorax", true) end
 	end
 
