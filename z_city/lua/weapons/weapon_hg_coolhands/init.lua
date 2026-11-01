@@ -781,7 +781,7 @@ function SWEP:AttackFront(special_attack, rand)
 			//Ent:EmitSound("physics/glass/glass_sheet_impact_hard"..math_random(3)..".wav")
 
 			//if math_random(1,8) == 8 and Ent:Health() < 250 then
-				hg.organism.AddWoundManual(owner, math.Rand(50,75) * 1, vector_origin, AngleRand(), owner:LookupBone("ValveBiped.Bip01_"..(rand and "R" or "L").."_Hand"), CurTime(), true)
+				hg.organism.AddWoundManual(owner, math.Rand(50,75) * 1, vector_origin, AngleRand(), owner:LookupBone("ValveBiped.Bip01_"..(rand and "R" or "L").."_Hand"), CurTime())
 				//Ent:Fire("Break")
 				//Ent.Broken = true
 			//end

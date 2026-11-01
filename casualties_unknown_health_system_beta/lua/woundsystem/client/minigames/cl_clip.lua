@@ -40,7 +40,6 @@ Clip.Guides = Clip.Guides or {
     syringeMinigameGuide = "Push syringe down to inject. Make sure to check the dosage.",
     lockpickMinigameGuide = "Click anywhere on the arch to try picking the lock.\nThe closer to the spot, the more it will turn.\nBe careful not to break your claws.",
     lifepodMinigameGuide = "Match the code to open.",
-    shrapnelMinigameGuide = "Pull the shrapnel out slowly. Going too fast will hurt.\nUsing tweezers will bypass the speed limit.",
     dislocationMinigameGuide = "Hit the bone into the correct spot to correct dislocation.\nUsing a wrench would hurt way less.",
     amputationMinigameGuide = "Saw through the limb to amputate. Make sure to stop the bleeding after.",
     aedMinigameGuide = "Follow the displayed instructions.",

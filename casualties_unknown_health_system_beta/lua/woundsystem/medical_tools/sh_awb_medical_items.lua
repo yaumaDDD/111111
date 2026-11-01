@@ -464,18 +464,3 @@ WoundSystem.Items.Register("WRENCH", {
         wrench = true
     }
 })
-
-WoundSystem.Items.Register("TWEEZERS", {
-    max = 100,
-    title = "Tweezers",
-    desc = "A simple pair of metal tweezers. Can cleanly and \npainlessly remove shrapnel from limbs.",
-    icon = "casunknown-images/items/tweezers.png",
-    pw = 16,
-    ph = 10,
-    use = {
-        minDurability = 1,
-        minigame = "shrapnel",
-        validLimbs = "any",
-        tweezers = true
-    }
-})

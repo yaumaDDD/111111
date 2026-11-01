@@ -100,9 +100,6 @@ end
 -- DAMAGE
 -----------------------------------------------------------------------------------------------------------------------
 
-local GLASS_SURFACES = {glass = true, glassbottle = true, glassfloor = true, brokenglass = true, glass_breakable = true}
-local GLASS_WEAPONS = {weapon_hg_glassshard = true, weapon_hg_glassshard_taped = true, weapon_hg_bottlebroken = true}
-
 local function CloneDamageInfo(src, damage)
 	local dmg = DamageInfo()
 	dmg:SetDamage(damage)
@@ -161,12 +158,6 @@ function WB.ApplyDamage(ply, dmgInfo, bonename, hitgroup, rawDamage, onRagdoll)
 
 	dbg("damage", ply, limb, damage)
 
-	-- hit with a glass shard / broken bottle: pieces stay in the wound
-	local inf = dmgInfo:GetInflictor()
-	if IsValid(inf) and GLASS_WEAPONS[inf:GetClass()] and not dmgInfo:IsDamageType(DMG_BULLET + DMG_BLAST) and math.random(2) == 1 then
-		WB.AddShards(ply, limb or (hitgroup and WB.HitgroupToWS[hitgroup]) or "thorax", 1)
-	end
-
 	-- make the result visible to Z-City at once (otrub / fake / death are evaluated from the shadow)
 	if ply:Alive() and ply.organism then
 		WB.Sync(ply, ply.organism)
@@ -176,16 +167,9 @@ function WB.ApplyDamage(ply, dmgInfo, bonename, hitgroup, rawDamage, onRagdoll)
 end
 
 -----------------------------------------------------------------------------------------------------------------------
--- COLLISIONS, FALLS, GLASS  (Z-City filters/structure, the damage itself is the C:U impact model)
+-- COLLISIONS, FALLS  (Z-City filters/structure, the damage itself is the C:U impact model)
 -----------------------------------------------------------------------------------------------------------------------
---- Embed `count` C:U shrapnel pieces (glass) into a limb: they are pulled out with the C:U shrapnel minigame
-function WB.AddShards(ply, limbId, count)
-	local H = Health()
-	if not (WB.IsBridged(ply) and H and H.AddLimbShrapnel) then return false end
-	return H.AddLimbShrapnel(ply, limbId, count or 1)
-end
-
---- Rough surfaces / glass cut the limb that hit them (Z-City: `bleedSurfaces`, 50%), glass leaves shards in the wound
+--- Rough surfaces / glass cut the limb that hit them (Z-City: `bleedSurfaces`, 50%)
 function WB.SurfaceCut(ply, limbId, force, surface)
 	local H = Health()
 	local limbs = WB.GetLimbs(ply)
@@ -200,10 +184,6 @@ function WB.SurfaceCut(ply, limbId, force, surface)
 	l.bleed = math.Clamp((l.bleed or 0) + force * 0.2, 0, 100)
 	if H.Fn and H.Fn.ClearLimbBandage then H.Fn.ClearLimbBandage(l) end
 	if H.SendLimbUpdate then H.SendLimbUpdate(ply, limbId, true) end
-
-	if GLASS_SURFACES[surface] then
-		WB.AddShards(ply, limbId, force > jump * 3 and 2 or 1)
-	end
 
 	return true
 end
@@ -269,7 +249,7 @@ function WB.ApplyFall(ply, dmgInfo)
 end
 
 --- Z-City AddWoundManual (gibs, glass, explosion cuts): turn it into WoundSystem bleeding
-function WB.AddWoundManual(ent, dmgBlood, bone, glass)
+function WB.AddWoundManual(ent, dmgBlood, bone)
 	local ply = WB.GetPlayer(ent)
 	if not WB.IsBridged(ply) then return false end
 
@@ -284,11 +264,6 @@ function WB.AddWoundManual(ent, dmgBlood, bone, glass)
 	local limb = limbs[limbId or "thorax"]
 	if limb and not limb.dismembered then
 		limb.bleed = math.Clamp((limb.bleed or 0) + (tonumber(dmgBlood) or 0) * 0.04, 0, 100)
-		if glass then
-			-- broken glass: a deeper cut and shards left in the wound (pulled out with the C:U shrapnel minigame)
-			limb.skin = math.Clamp((limb.skin or 100) - (tonumber(dmgBlood) or 0) * 0.5, 0, 100)
-			WB.AddShards(ply, limbId or "thorax", math.Clamp(math.floor((tonumber(dmgBlood) or 0) / 25), 1, 3))
-		end
 		if H.SendLimbUpdate then H.SendLimbUpdate(ply, limbId or "thorax", true) end
 	end
 

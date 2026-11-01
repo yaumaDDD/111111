@@ -138,7 +138,6 @@ local SERVER_OPTIONS = {
     {label = "Dislocation heal speed", cvar = "woundsys_dislocation_heal_speed", min = 0.001, max = 5, decimals = 3},
     {label = "Fibrillation rise rate", cvar = "woundsys_fibrillation_rise_rate", min = 0, max = 10, decimals = 2},
     {label = "Fibrillation decay rate", cvar = "woundsys_fibrillation_decay_rate", min = 0, max = 10, decimals = 2},
-    {label = "Shrapnel input Hz", cvar = "woundsys_shrapnel_input_hz", min = 5, max = 60, decimals = 0},
     {label = "Strokes enabled", cvar = "woundsys_strokes_enabled", kind = "bool"},
     {label = "Temperature simulation", cvar = "woundsys_temperature_enabled", kind = "bool"},
     {label = "Map suffocation damage", cvar = "woundsys_map_suffocation_enabled", kind = "bool"},
@@ -731,21 +730,6 @@ local function BuildAdminDebugPanel(panel)
     local btnRestoreLimb = panel:Button("Restore Limb (un-dismember)")
     btnRestoreLimb.DoClick = function()
         SendAdminDebug("set_dismember", selectedLimb, 0)
-    end
-
-    -- SECTION: Shrapnel
-    panel:Help("--- Shrapnel ---")
-
-    local shrapEntry = panel:TextEntry("Shrapnel Amount", "1")
-
-    local btnAddShrap = panel:Button("Add Shrapnel to Selected Limb")
-    btnAddShrap.DoClick = function()
-        SendAdminDebug("add_shrapnel", selectedLimb, tonumber(shrapEntry:GetValue()) or 1)
-    end
-
-    local btnRemShrap = panel:Button("Remove All Shrapnel from Selected Limb")
-    btnRemShrap.DoClick = function()
-        SendAdminDebug("remove_shrapnel", selectedLimb, 0)
     end
 
     -- SECTION: Bleeding per-limb

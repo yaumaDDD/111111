@@ -307,7 +307,7 @@ local function DrawMinigameHeader()
 
     local item = GetActiveItem()
     local maxDur = item and item.max or 100
-    local curDur = slot.durability or 0
+    local curDur = MG.shownDur or slot.durability or 0
     local durPct = math.Round(math.Clamp(curDur / math.max(maxDur, 1), 0, 1) * 100)
 
     WoundSystem.MinigameClip.DrawHeader({
@@ -567,6 +567,8 @@ net.Receive("WoundSystem_BandageOpen", function()
     local slotTool = (MG.slotIdx and WoundSystemInventorySlots[MG.slotIdx]) and WoundSystemInventorySlots[MG.slotIdx].toolName or "GAUZE"
     local maxDur = WoundSystemMedToolConfig and WoundSystemMedToolConfig[slotTool] and WoundSystemMedToolConfig[slotTool].max or 20
     MG.condition = math.Clamp(curDur / maxDur, 0, 1)
+    MG.minDur = curDur
+    MG.shownDur = curDur
 
     MG.lastSampleAt = CurTime()
     MG.lastSentAt = CurTime()
@@ -609,10 +611,17 @@ hook.Add("Think", "WoundSystem_BandageInput", function()
 
     local slotTool = slot.toolName or "GAUZE"
     local maxDur = WoundSystemMedToolConfig and WoundSystemMedToolConfig[slotTool] and WoundSystemMedToolConfig[slotTool].max or 20
-    MG.condition = math.Clamp(slot.durability / maxDur, 0, 1)
 
     local now = CurTime()
     local dt = math.Clamp(now - (MG.lastSampleAt or now), 0.001, CFG.MaxFrameTime)
+
+    -- Remaining bandage as shown to the player: it only goes down (a late server value never bumps it back up),
+    -- includes the part that is wound but not sent yet, and eases towards the target instead of jumping.
+    MG.minDur = math.min(MG.minDur or slot.durability, slot.durability)
+    local pending = ((MG.unsentDegrees or 0) / 360) * GetDurabilityPerWrap()
+    local shownTarget = math.max(0, MG.minDur - pending)
+    MG.shownDur = (MG.shownDur or shownTarget) + (shownTarget - (MG.shownDur or shownTarget)) * (1 - math.exp(-dt * 14))
+    MG.condition = math.Clamp(MG.shownDur / maxDur, 0, 1)
     MG.lastSampleAt = now
     
     local cx, cy = ScrW() / 2, ScrH() / 2

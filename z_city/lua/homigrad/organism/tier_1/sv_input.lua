@@ -265,9 +265,9 @@ function hg.organism.AddWound(ent, tr, bone, dmgInfo, dmgPos, dmgBlood, inputHol
 	end
 end
 
-function hg.organism.AddWoundManual(ent,dmgBlood,localPos,localAng,bone,time,glass)
-	-- living WoundSystem player: the cut becomes WoundSystem bleeding (glass = broken glass: shards stay in the wound)
-	if hg.WoundBridge and hg.WoundBridge.AddWoundManual(ent, dmgBlood, bone, glass) then return end
+function hg.organism.AddWoundManual(ent,dmgBlood,localPos,localAng,bone,time)
+	-- living WoundSystem player: the cut becomes WoundSystem bleeding
+	if hg.WoundBridge and hg.WoundBridge.AddWoundManual(ent, dmgBlood, bone) then return end
 
 	local org = ent.organism
 	if org.superfighter then return end

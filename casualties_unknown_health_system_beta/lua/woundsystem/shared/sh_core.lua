@@ -6,11 +6,6 @@ WoundSystem.Version = WoundSystem.Version or "modular"
 WoundSystem.NetStrings = WoundSystem.NetStrings or {
     "WoundSystem_UpdateLimb",
     "WoundSystem_UpdateCardio",
-    "WoundSystem_ShrapnelStart",
-    "WoundSystem_ShrapnelOpen",
-    "WoundSystem_ShrapnelInput",
-    "WoundSystem_ShrapnelState",
-    "WoundSystem_ShrapnelClose",
     "WoundSystem_DislocationStart",
     "WoundSystem_DislocationOpen",
     "WoundSystem_DislocationInput",

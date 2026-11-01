@@ -36,19 +36,12 @@ function LimbMuscle.GetHealRatePerSecond(muscleHealth)
     return LimbMuscle.HEAL_RATE_NORMAL
 end
 
--- C#: (!infected || isHead) && body.hunger > 0, plus shrapnel blocks regen
+-- C#: (!infected || isHead) && body.hunger > 0
 function LimbMuscle.CanRegenerateMuscle(state, limbName, body)
     if not state then return false end
     
     local muscle = state.muscle or 100
     local roles = LimbMuscle.GetRoles(limbName)
-    local hasShrapnel = (state.shrapnel or 0) > 0
-    if hasShrapnel then
-        if not roles.isHead or muscle > 14.28571 then
-            return false
-        end
-    end
-
     local hunger = body and body.hunger
     if hunger == nil then hunger = 100 end
     if hunger <= 0 then return false end
@@ -81,18 +74,10 @@ function LimbMuscle.Tick(state, limbName, body, dt, healingRateMult)
         local sleepingMult = sleeping and 1.4 or 1.0
         local lowMuscleFactor = (muscle > 10 or roles.isHead) and 1.0 or 0.25
         
-        local hasShrapnel = (state.shrapnel or 0) > 0
-        local shrapnelFactor = 1.0
-        if hasShrapnel then
-            if not roles.isHead or muscle > 14.28571 then
-                shrapnelFactor = 0.0
-            end
-        end
-
         local hungerHealCurrent = body and body.hungerLimbHealCurrent or (math.max((body and body.hunger or 100) * 0.01, 0))
         
-        -- C# MuscleHealRate: dt * 0.08 * sleepingMult * lowMuscleFactor * shrapnelFactor * hungerHealCurrent * healingRateMult
-        local muscleHealRate = dt * 0.08 * sleepingMult * lowMuscleFactor * shrapnelFactor * hungerHealCurrent * healingRateMult
+        -- C# MuscleHealRate: dt * 0.08 * sleepingMult * lowMuscleFactor * hungerHealCurrent * healingRateMult
+        local muscleHealRate = dt * 0.08 * sleepingMult * lowMuscleFactor * hungerHealCurrent * healingRateMult
         muscle = muscle + muscleHealRate
     end
 

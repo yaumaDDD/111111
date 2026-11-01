@@ -793,10 +793,6 @@ if not (WoundSystem and WoundSystem.MinigameClip) and file.Exists("woundsystem/c
     include("woundsystem/client/minigames/cl_clip.lua")
 end
 
-if not (WoundSystemShrapnelMinigame and WoundSystemShrapnelMinigame._Loaded) and file.Exists("woundsystem/client/minigames/cl_shrapnel.lua", "LUA") then
-    include("woundsystem/client/minigames/cl_shrapnel.lua")
-end
-
 if not (WoundSystemDislocationMinigame and WoundSystemDislocationMinigame._Loaded) and file.Exists("woundsystem/client/minigames/cl_dislocation.lua", "LUA") then
     include("woundsystem/client/minigames/cl_dislocation.lua")
 end
@@ -948,7 +944,6 @@ Icons = {
     infection_down = PaddedMaterial(iconPath .. "infectiondown.png"),
     infectionneutral = PaddedMaterial(iconPath .. "infection.png"),
     disinfected = PaddedMaterial(iconPath .. "disinfected.png"),
-    shrapnel = PaddedMaterial(iconPath .. "shrapnel.png"),
     dislocate = PaddedMaterial(iconPath .. "dislocatedbone.png"),
     disfiguredExpWound = WoundSystemBloodVariantMaterial(iconPath .. "disfiguredExpWound.png", iconPath .. "disfiguredexpwound_red.png"),
     fracture = PaddedMaterial(iconPath .. "fracturedbone.png"),
@@ -1033,7 +1028,7 @@ WoundSystemLimbUIConfig = {
         StepX = 50,
         StepY = 0.2
     },
-    ShrapnelPoint = {
+    ActionPoint = {
         Width = 180,
         Height = 60,
         OffsetX = 0,
@@ -1043,7 +1038,6 @@ WoundSystemLimbUIConfig = {
         Alpha = 255,
         HoverAlpha = 255,
         ActiveAlpha = 255,
-        Text = "REMOVE SHRAPNEL",
         TextEnabled = true,
         TextFont = "RetroTooltipDesc",
         TextOffsetX = -85,
@@ -1052,16 +1046,6 @@ WoundSystemLimbUIConfig = {
         TextHoverColor = Color(255, 255, 255, 255),
         TextActiveColor = Color(255, 255, 255, 255),
         Actions = {
-            SHRAPNEL = {
-                Text = "REMOVE SHRAPNEL",
-                TooltipKey = "removeshrapnel",
-                Width = 180,
-                Height = 60,
-                OffsetX = 0,
-                OffsetY = -30,
-                TextOffsetX = -85,
-                TextOffsetY = -20
-            },
             TOURNIQUET = {
                 Text = "REMOVE TOURNIQUET",
                 TooltipKey = "removetourniquet",
@@ -1211,7 +1195,6 @@ WoundSystemCasTooltipText = {
     hplimbbleed = {"Limb bleeding", ""},
     hplimbforce = {"Limb strength", "The limb's total ability to move and exert force"},
     removetourniquet = {"Remove tourniquet", ""},
-    removeshrapnel = {"Remove shrapnel", "Try to remove shrapnel by hand"},
     removesplint = {"Remove splint", "Take off the splint from the limb"},
     fixdislocation = {"Fix dislocation", "Try to correct the dislocation by hand"}
 }
@@ -1385,7 +1368,6 @@ local defaultLimbState = {
     bleed = 0, 
     infection = 0,
     infectionSpeed = 0, 
-    shrapnel = 0,
     disinfectTime = 0,
     dislocated = false,
     broken = false, 
@@ -1767,7 +1749,6 @@ end
 
 function WoundSystemIsAnyWoundMinigameActive()
     local minigames = {
-        WoundSystemShrapnelMinigame,
         WoundSystemDislocationMinigame,
         WoundSystemBandageMinigame,
         WoundSystemSyringeMinigame,
@@ -1786,7 +1767,6 @@ end
 
 local function CloseWoundMinigames(reason)
     local minigames = {
-        WoundSystemShrapnelMinigame,
         WoundSystemDislocationMinigame,
         WoundSystemBandageMinigame,
         WoundSystemSyringeMinigame,
@@ -1811,20 +1791,6 @@ local function ShouldShowInfectionIndicator(limbId, infection)
     end
 
     return GUIState.InfectionIconLatched[limbId] == true and infection >= 1
-end
-
-local function RequestShrapnelMinigameStart(limbId, slotIdx)
-    if not limbId or limbId == "" then return end
-
-    if WoundSystemShrapnelMinigame and WoundSystemShrapnelMinigame.RequestStart then
-        WoundSystemShrapnelMinigame.RequestStart(limbId, slotIdx)
-        return
-    end
-
-    net.Start("WoundSystem_ShrapnelStart")
-        net.WriteString(limbId)
-        net.WriteUInt(slotIdx or 0, 3)
-    net.SendToServer()
 end
 
 local function RequestDislocationMinigameStart(limbId, slotIdx)
@@ -1994,16 +1960,6 @@ local function UseMedicalToolOnLimb(tool, slotIdx, limbId)
         return false
     end
 
-    if use and use.minigame == "shrapnel" then
-        local minDur = use.minDurability or 0
-        if state and (state.shrapnel or 0) > 0 and tool.durability > minDur then
-            RequestShrapnelMinigameStart(limbId, slotIdx)
-            return true
-        end
-
-        return false
-    end
-
     if use then
         local maxDur = GetToolMax(tool.toolName)
         local minDur = use.minDurability or use.durabilityCost or 0
@@ -2158,7 +2114,6 @@ net.Receive("WoundSystem_UpdateLimb", function()
     state.bleed = net.ReadFloat()
     state.infection = net.ReadFloat()
     state.infectionSpeed = net.ReadFloat()
-    state.shrapnel = net.ReadUInt(4) 
     state.disinfectTime = net.ReadFloat()
     state.broken = net.ReadBool()     
     state.dislocated = net.ReadBool() 
@@ -3750,22 +3705,20 @@ end
 WoundSystemActionButtonPos = WoundSystemActionButtonPos or {x = nil, y = nil}
 
 function WoundSystemDrawLimbActionPoint(limbId, state, pointPos, bX, bY, scale, dollScale, mx, my, isClicking, lastMouseState, minigameActive)
-    local actionStatus = "SHRAPNEL"
+    local actionStatus = nil
 
     if state.customStatuses and state.customStatuses["TOURNIQUET"] then
         actionStatus = "TOURNIQUET"
-    elseif (state.shrapnel or 0) > 0 then
-        actionStatus = "SHRAPNEL"
     elseif state.customStatuses and state.customStatuses["SPLINTED"] then
         actionStatus = "SPLINTED"
     elseif state.dislocated then
         actionStatus = "DISLOCATION"
     end
 
-    if actionStatus == "SHRAPNEL" and (state.shrapnel or 0) <= 0 then return end
+    if not actionStatus then return end
     if actionStatus == "DISLOCATION" and not state.dislocated then return end
 
-    local pointCfg = WoundSystemLimbUIConfig.ShrapnelPoint or {}
+    local pointCfg = WoundSystemLimbUIConfig.ActionPoint or {}
     local actionCfg = (pointCfg.Actions and pointCfg.Actions[actionStatus]) or {}
     local pointW = (actionCfg.Width or pointCfg.Width or pointCfg.Size or 32) * scale
     local pointH = (actionCfg.Height or pointCfg.Height or pointCfg.Size or 32) * scale
@@ -3788,6 +3741,7 @@ function WoundSystemDrawLimbActionPoint(limbId, state, pointPos, bX, bY, scale, 
     local pointX = pointCenterX - (pointW * 0.5)
     local pointY = pointCenterY - (pointH * 0.5)
     local hoveringPoint = mx >= pointX and mx <= (pointX + pointW) and my >= pointY and my <= (pointY + pointH)
+    if hoveringPoint then GUIState.actionPointHovered = true end
     local pointAlpha = minigameActive and (pointCfg.ActiveAlpha or 90) or (hoveringPoint and (pointCfg.HoverAlpha or 255) or (pointCfg.Alpha or 190))
     local pulseScale = hoveringPoint and (pointCfg.HoverScale or 1.12) or 1
     local drawW = pointW * pulseScale
@@ -3800,23 +3754,19 @@ function WoundSystemDrawLimbActionPoint(limbId, state, pointPos, bX, bY, scale, 
 
     if pointCfg.TextEnabled ~= false then
         local textColor = minigameActive and (pointCfg.TextActiveColor or Color(86, 221, 132, 120)) or (hoveringPoint and (pointCfg.TextHoverColor or Color(86, 255, 162, 255)) or (pointCfg.TextColor or Color(47, 224, 129, 255)))
-        draw.SimpleText(actionCfg.Text or pointCfg.Text or "REMOVE SHRAPNEL", actionCfg.TextFont or pointCfg.TextFont or "CrunchyTechFont", pointCenterX + ((actionCfg.TextOffsetX or pointCfg.TextOffsetX or 38) * scale), pointCenterY + ((actionCfg.TextOffsetY or pointCfg.TextOffsetY or -7) * scale), textColor, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+        draw.SimpleText(actionCfg.Text or pointCfg.Text or "", actionCfg.TextFont or pointCfg.TextFont or "CrunchyTechFont", pointCenterX + ((actionCfg.TextOffsetX or pointCfg.TextOffsetX or 38) * scale), pointCenterY + ((actionCfg.TextOffsetY or pointCfg.TextOffsetY or -7) * scale), textColor, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
     end
 
     if hoveringPoint then
-        local tipTitle, tipDesc = WoundSystemTooltipText(actionCfg.TooltipKey or "removeshrapnel")
+        local tipTitle, tipDesc = WoundSystemTooltipText(actionCfg.TooltipKey or "")
         WoundSystemQueueDirectTooltip("action_" .. actionStatus, tipTitle, tipDesc, 35)
     end
 
     if hoveringPoint and isClicking and not GUIState.lastMouseState and not minigameActive then
-        if actionStatus ~= "SHRAPNEL" then
-            if actionStatus == "DISLOCATION" then
-                RequestDislocationMinigameStart(limbId)
-            else
-                RequestRemoveLimbStatus(limbId, actionStatus)
-            end
+        if actionStatus == "DISLOCATION" then
+            RequestDislocationMinigameStart(limbId)
         else
-            RequestShrapnelMinigameStart(limbId)
+            RequestRemoveLimbStatus(limbId, actionStatus)
         end
     end
 end
@@ -4073,10 +4023,6 @@ hook.Add("HUDPaint", "WoundDollAndPanel", function()
                         AddHudIcon(iconItems, mat, GetStatusIconColor(status.data, limbAlpha, status.value))
                     end
                 end
-            end
-
-            if state.shrapnel > 0 then
-                AddHudIcon(iconItems, Icons.shrapnel, Color(155, 110, 62, limbAlpha))
             end
 
             if ShouldShowInfectionIndicator(limb.id, state.infection) then
@@ -4648,7 +4594,19 @@ hook.Add("HUDPaint", "WoundDollAndPanel", function()
     end
 
     WoundSystemSelectedLimbId = GUIState.selectedLimbData and GUIState.selectedLimbData.id or nil
-    
+
+    -- A click on an empty spot (not on a limb, the action button, the info panel or a minigame) closes the wound view
+    do
+        local overPanel = mx >= panelX and mx <= panelX + panelW and my >= (20 * scale) and my <= (20 * scale) + panelH
+        local ownsClick = hoveredLimbId or GUIState.actionPointHovered or overPanel
+            or minigameActive or (WoundSystemWorldDrag and WoundSystemWorldDrag.active)
+            or (WoundSystem.HealthGUI.IsExternalMenuOpen and WoundSystem.HealthGUI.IsExternalMenuOpen())
+        if isClicking and not GUIState.lastMouseState and not ownsClick and CurTime() - (GUIState.openTime or 0) > 0.3 then
+            WoundSystem.CloseHealthHUD()
+        end
+    end
+
+    GUIState.actionPointHovered = false
     GUIState.lastMouseState = isClicking
     GUIState.lastRightMouseState = isRightClicking
     WoundSystemWorldDrag = WoundSystemWorldDrag or { active = false, ent = nil }

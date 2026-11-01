@@ -36,27 +36,6 @@ Constants.FurBloodRegionByLimb = {
     foot_R = "rightLeg"
 }
 
-Constants.ShrapnelPieceCount = 5
-Constants.ShrapnelPullZoneY = -60
-Constants.ShrapnelExtractY = Constants.ShrapnelPullZoneY
-Constants.ShrapnelReimpaleY = Constants.ShrapnelExtractY - 8
-Constants.ShrapnelHandStartY = -170
-Constants.ShrapnelMinY = -364
-Constants.ShrapnelFreeMaxY = 240
-Constants.ShrapnelDragSmooth = 0.55
-Constants.ShrapnelBreakVelY = 2.2
-Constants.ShrapnelBreakXDist = 42
-Constants.ShrapnelGrabHalfX = 75
-Constants.ShrapnelGrabHalfY = 350
-Constants.ShrapnelInputTimeout = 1.5
-Constants.ShrapnelBasePos = {
-    {x = -86, y = -214},
-    {x = -44, y = -214},
-    {x =   0, y = -214},
-    {x =  44, y = -214},
-    {x =  86, y = -214}
-}
-
 Constants.DislocationFinishX = 421.82
 Constants.DislocationFinishY = 229.82
 Constants.DislocationStartSpread = 5
@@ -77,4 +56,4 @@ Constants.RagdollWakeCollisionGraceDuration = 1.1
 Constants.RagdollWakeCollisionGracePoll = 0.1
 Constants.LimbTimerName = "WoundSystem_LimbTick"
 Constants.CardioTimerName = "WoundSystem_CardioTick"
-Constants.ShrapnelTimerName = "WoundSystem_ShrapnelTick"
+Constants.MedicalSessionTimerName = "WoundSystem_MedicalSessionTick"
