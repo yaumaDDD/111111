@@ -8,6 +8,15 @@ function WoundSystemHealthEnabled()
     return not cvar or cvar:GetBool()
 end
 
+-- Z-City integration: returns hg.WoundBridge when WoundSystem is the health back-end of Z-City.
+-- In that mode Z-City owns the physical ragdoll (hg.Fake / hg.FakeUp) and WoundSystem only
+-- decides *when* the body goes down / gets up.
+function WoundSystemBridgeActive()
+    local WB = hg and hg.WoundBridge
+    if WB and WB.IsEnabled and WB.IsEnabled() then return WB end
+    return nil
+end
+
 local function WoundSystem_RemoveVanillaDeathRagdollFor(ply)
     if not IsValid(ply) then return end
 
@@ -2873,6 +2882,8 @@ local SnapshotCorpseVisualState
 
 local function PreserveUnconsciousRagdollForDeath(ply, body)
     if not IsValid(ply) or not body then return false end
+    -- Z-City turns its own fake ragdoll into the death ragdoll (DoPlayerDeath), nothing to preserve here.
+    if WoundSystemBridgeActive() then return false end
 
     local ragdoll = body.unconsciousRagdoll
     if not IsValid(ragdoll) then return false end
@@ -2933,6 +2944,8 @@ end
 
 local function RestorePlayerFromUnconsciousRagdoll(ply, body, keepRagdoll, preserveCurrentTransform)
     if not IsValid(ply) then return end
+    local WB = WoundSystemBridgeActive()
+    if WB then return WB.RestoreRagdoll(ply, body, keepRagdoll, preserveCurrentTransform) end
     local debugWakePerf = GetConVar("woundsys_wake_perf_debug")
     local wakePerfEnabled = debugWakePerf and debugWakePerf:GetBool()
     local restoreStarted = wakePerfEnabled and SysTime() or 0
@@ -3198,6 +3211,8 @@ local function TryRecoverDroppedWeapon(ply, wep)
 end
 
 local function TryCreateUnconsciousRagdoll(ply, body)
+    local WB = WoundSystemBridgeActive()
+    if WB then return WB.CreateRagdoll(ply, body) end
     if not IsValid(ply) or not body then return false end
 
     ply:SetNWFloat("WoundSystemBrainShakeUntil", 0)
@@ -4332,6 +4347,9 @@ function WoundSystem.Dismember(ply, limbName)
     if not state or state.dismembered then return false end
     local body = GetBody(ply)
     local visualEnt = (body and IsValid(body.unconsciousRagdoll)) and body.unconsciousRagdoll or ply
+    if visualEnt == ply and WoundSystemBridgeActive() and IsValid(ply.FakeRagdoll) then
+        visualEnt = ply.FakeRagdoll
+    end
 
     visualEnt:EmitSound("physics/flesh/flesh_squishy_impact_hard4.wav", 65, 90, 1)
 
@@ -6346,6 +6364,7 @@ local function LoadPlayerPersistData(ply)
 end
 
 hook.Add("PlayerSpawn", "WoundSystem_SpawnSync", function(ply)
+    if OverrideSpawn then return end -- Z-City get-up from fake ragdoll, not a real respawn
     WoundSystem.Health.BumpLifecycleSeq(ply)
     ply:SetNWEntity("WoundSystemDeathRagdoll", NULL)
     if not WoundSystemHealthEnabled() then
@@ -6394,7 +6413,7 @@ hook.Add("PlayerSpawn", "WoundSystem_SpawnSync", function(ply)
     end)
 end)
 
-hook.Add("EntityTakeDamage", "WoundSystem_Damage", function(ent, dmginfo)
+WoundSystem.Health.HandleDamage = function(ent, dmginfo)
     if IsValid(ent) and ent:IsPlayer() and ent._WoundSystemApplyingAttributedDeath then
         return
     end
@@ -6661,7 +6680,10 @@ hook.Add("EntityTakeDamage", "WoundSystem_Damage", function(ent, dmginfo)
         local hitgroup = ply:LastHitGroup()
         local singleLimb = Const.HitgroupToLimb[hitgroup]
 
-        if dmginfo:IsDamageType(DMG_CLUB) or dmginfo:IsDamageType(DMG_SLASH) or hitgroup == HITGROUP_GENERIC or not singleLimb then
+        if ply._WoundBridgeLimb then
+            -- Z-City bridge: the limb was resolved from the exact hit bone, no random pick.
+            singleLimb = ply._WoundBridgeLimb
+        elseif dmginfo:IsDamageType(DMG_CLUB) or dmginfo:IsDamageType(DMG_SLASH) or hitgroup == HITGROUP_GENERIC or not singleLimb then
             singleLimb = Fn.PickRandomDamageLimb(ply)
         end
 
@@ -6961,6 +6983,14 @@ hook.Add("EntityTakeDamage", "WoundSystem_Damage", function(ent, dmginfo)
 
     SendCardioUpdate(ply, body and (body.unconscious or body.fallingRagdoll))
     dmginfo:SetDamage(0)
+end
+
+hook.Add("EntityTakeDamage", "WoundSystem_Damage", function(ent, dmginfo)
+    -- With Z-City the damage is pre-processed by Z-City (armor, penetration, ragdoll redirect)
+    -- and forwarded through hg.WoundBridge.ApplyDamage, which sets WB.InDamage while calling us.
+    local WB = WoundSystemBridgeActive()
+    if WB and not WB.InDamage then return end
+    return WoundSystem.Health.HandleDamage(ent, dmginfo)
 end)
 
 local function LimbPhysiologyTick(dt)
@@ -7929,6 +7959,7 @@ local function CardioLiteTick(dt)
             if now >= (body.nextRagdollMotionCheck or 0) then
                 isMoving = false
                 local ragdoll = body.unconsciousRagdoll
+                if not IsValid(ragdoll) and WoundSystemBridgeActive() then ragdoll = ply.FakeRagdoll end
                 if IsValid(ragdoll) then
                     local physCount = ragdoll.WoundSystemPhysObjectCount
                     if not physCount then
@@ -8185,6 +8216,12 @@ hook.Add("SetupMove", "WoundSystem_StaminaSlowdown", function(ply, mvd, cmd)
 
     local speedMult = math.Clamp(movementMult, 0.02, 1.25)
     local cmdMult = math.Clamp(movementMult * moveForceMult, 0.02, 1.25)
+
+    if WoundSystemBridgeActive() then
+        -- Z-City's inertia movement multiplies the same value in shared code (org.wsmovemult),
+        -- applying it here as well would slow the player down twice.
+        speedMult, cmdMult = 1, 1
+    end
 
     if speedMult ~= 1 or cmdMult ~= 1 then
         mvd:SetMaxClientSpeed(mvd:GetMaxClientSpeed() * speedMult)
@@ -8733,6 +8770,89 @@ WoundSystem.Health.SyncInventoryToClient = SyncInventoryToClient
 WoundSystem.Health.GetInventory = GetInventory
 WoundSystem.Health.TryCreateUnconsciousRagdoll = TryCreateUnconsciousRagdoll
 WoundSystem.Health.RestorePlayerFromUnconsciousRagdoll = RestorePlayerFromUnconsciousRagdoll
+WoundSystem.Health.Fn = Fn
+WoundSystem.Health.Const = Const
+WoundSystem.Health.RagdollBoneNameToLimb = RagdollBoneNameToLimb
+WoundSystem.Health.SendCardioUpdate = function(ply, ...) if SendCardioUpdate then return SendCardioUpdate(ply, ...) end end
+
+-----------------------------------------------------------
+-- Z-City integration API: apply a medical item (used by Z-City SWEPs) directly to a player's limb,
+-- without the inventory / minigame UI.
+--
+--   amount  = durability units (0..item.max) spent by this application for "bandage" and "syringe"
+--             items. Because a full item is worth 100 durability, `amount / 100` of the whole
+--             profile effect is applied (exactly what the minigames do). For one-shot items
+--             (use.apply) it is ignored: the item is applied once with a full slot, unless
+--             opts.partial is set (then the slot holds exactly `amount` durability).
+--   returns ok, usedDurability
+-----------------------------------------------------------
+function WoundSystem.Health.ApplyItemToBody(target, itemId, limbId, amount, opts)
+    if not WoundSystemHealthEnabled() then return false end
+    if not IsValid(target) or not target:IsPlayer() or not target:Alive() then return false end
+
+    itemId = NormalizeToolId(itemId)
+    local item = WoundSystem.Items and WoundSystem.Items.Get and WoundSystem.Items.Get(itemId)
+    if not item then return false end
+
+    if not PlayerLimbs[target] then InitPlayer(target) end
+    if not GetLimbState(target, limbId) then return false end
+
+    local use = item.use or {}
+    if WoundSystem.Items.LimbAllowed and not WoundSystem.Items.LimbAllowed(use, limbId) then return false end
+
+    local minigame = use.minigame
+    if minigame == "aed" or minigame == "dislocation" or minigame == "shrapnel" then
+        return false -- these need the interactive WoundSystem minigame
+    end
+
+    amount = math.max(tonumber(amount) or 0, 0)
+
+    if minigame == "bandage" or minigame == "syringe" then
+        if amount <= 0 then return false end
+
+        local slot = WoundSystem.Items.CreateSlot(itemId, amount)
+        local ctx = BuildMedicalItemContext(target, item, nil, slot, limbId)
+        if type(use.canUse) == "function" and use.canUse(ctx) == false then return false end
+
+        local ok
+        if minigame == "bandage" then
+            local profile = Fn.GetBandageProfile(itemId)
+            if not profile then return false end
+            ctx.wrapFraction = amount / math.max(profile.durabilityPerWrap or 1, 0.001)
+            ctx.profile = profile
+            ok = ApplyBandageProfile(ctx, profile) ~= false
+            if ok and type(profile.applyWrap) == "function" then
+                ok = profile.applyWrap(ctx) ~= false
+            end
+        else
+            local profile = GetSyringeProfile(itemId)
+            if not profile then return false end
+            ctx.syringeFraction = amount / math.max(item.max or 100, 1)
+            ctx.durabilityCost = amount
+            ctx.profile = profile
+            ok = ApplySyringeProfile(ctx, profile) ~= false
+        end
+
+        if not ok then return false end
+        SendLimbUpdate(target, limbId, true)
+        if SendCardioUpdate then SendCardioUpdate(target) end
+        return true, amount
+    end
+
+    -- opts.partial: the item is applied with exactly `amount` durability in its slot (continuous use, e.g. a blood bag
+    -- running for a few ticks); otherwise it is applied once with a full slot.
+    local partial = type(opts) == "table" and opts.partial == true
+    if partial and amount <= 0 then return false end
+    local slotDurability = partial and amount or math.max(amount, item.max or 100)
+
+    local slot = WoundSystem.Items.CreateSlot(itemId, slotDurability)
+    local ok = UseRegisteredMedicalItem(target, itemId, limbId, nil, slot)
+    if not ok then return false end
+
+    SendLimbUpdate(target, limbId, true)
+    if SendCardioUpdate then SendCardioUpdate(target) end
+    return true, partial and amount or (tonumber(use.consumeDurability) or (item.max or 100))
+end
 
 if util and util.AddNetworkString then
     util.AddNetworkString("WoundSystem_BloodVomit")

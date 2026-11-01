@@ -142,7 +142,9 @@ if SERVER then
 					local ent = owner:KeyDown(IN_ATTACK) and owner or hg.eyeTrace(self:GetOwner()).Entity
 					if not ent.organism then return end
 					local ent = hg.GetCurrentCharacter(ent)
-					if ent:GetVelocity():LengthSqr() < 25 and ent.organism.blood > 2000 and (not self.bloodtype or ent.organism.bloodtype == self.bloodtype) then
+					-- WoundSystem players are handled by hg.WoundBridge (blood volume / transfusion in WoundSystem), the rest by the legacy code
+					if hg.WoundBridge and hg.WoundBridge.BloodBagTake and hg.WoundBridge.BloodBagTake(self, ent) then
+					elseif ent:GetVelocity():LengthSqr() < 25 and ent.organism.blood > 2000 and (not self.bloodtype or ent.organism.bloodtype == self.bloodtype) then
 						local old = -(-self.modeValues[1])
 						self.modeValues[1] = math.min(self.modeValues[1] + FrameTime() * (math.max(ent.organism.pulse / 70,0.3)) * 0.5,1)
 						self.bloodtype = ent.organism.bloodtype
@@ -171,7 +173,9 @@ if SERVER then
 					local ent = owner:KeyDown(IN_ATTACK) and owner or hg.eyeTrace(self:GetOwner()).Entity
 					if not ent.organism then return end
 					local ent = hg.GetCurrentCharacter(ent)
-					if ent:GetVelocity():LengthSqr() < 1000 then
+					-- WoundSystem players are handled by hg.WoundBridge, the rest by the legacy code
+					if hg.WoundBridge and hg.WoundBridge.BloodBagGive and hg.WoundBridge.BloodBagGive(self, ent) then
+					elseif ent:GetVelocity():LengthSqr() < 1000 then
 						local old = -(-ent.organism.blood)
 						local good_type = hg.organism.bloodtypes[self.bloodtype or "o-"][ent.organism.bloodtype or "o-"]
 

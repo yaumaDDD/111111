@@ -352,6 +352,9 @@ hook.Add("Post Post Processing", "ItHurts", function()
 		render.DrawScreenQuad()
 	end
 
+	-- WoundSystem draws its own pain / blood loss / unconsciousness screen effects
+	if hg.WoundBridge and hg.WoundBridge.IsEnabled and hg.WoundBridge.IsEnabled() then stopthings() return end
+
 	if (org.consciousness < 0.7) then
 		lerpblood = LerpFT(0.01, lerpblood or 0, math.Clamp((0.7 - org.consciousness) * 5, 0, 1) * 255)
 		local lowblood = (3600 - (org.blood or 5000)) / 600

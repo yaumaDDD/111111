@@ -165,6 +165,9 @@ local ents_Create = ents.Create
 function hg.organism.AmputateLimb(org, limb)
 	if org[limb.."amputated"] == nil then return end
 
+	-- WoundSystem owns the body of a living player: dismember through it (visuals come from its ragdoll hook)
+	if hg.WoundBridge and hg.WoundBridge.Amputate(org, limb) then return end
+
 	local bone = limbs[limb]
 	if !IsValid(org.owner) then return end
 	local len = org.owner:BoneLength(org.owner:LookupBone(bone))
@@ -263,6 +266,9 @@ function hg.organism.AddWound(ent, tr, bone, dmgInfo, dmgPos, dmgBlood, inputHol
 end
 
 function hg.organism.AddWoundManual(ent,dmgBlood,localPos,localAng,bone,time)
+	-- living WoundSystem player: the cut becomes WoundSystem bleeding
+	if hg.WoundBridge and hg.WoundBridge.AddWoundManual(ent, dmgBlood, bone) then return end
+
 	local org = ent.organism
 	if org.superfighter then return end
 	
@@ -822,7 +828,7 @@ hook.Add("EntityTakeDamage", "homigrad-damage", function(ent, dmgInfo)
 	
 		org.shock_turn = 10 * (!org.otrub and 1 or 0.1)
 	
-		if org.shock > org.shock_turn * 1.5 * analgesiaMul * painkillerMul then
+		if org.shock > org.shock_turn * 1.5 * analgesiaMul * painkillerMul and not (ply and hg.WoundBridge and hg.WoundBridge.IsBridged(ply)) then
 			timer.Simple(0, function() hg.Fake(org.owner) end)
 		end
 
@@ -1056,6 +1062,18 @@ hook.Add("EntityTakeDamage", "homigrad-damage", function(ent, dmgInfo)
 	if !org.rarmamputated and dmgInfo:IsDamageType(DMG_BLAST) then
 		hg.organism.AmputateLimb(org, "rarm")
 	end--]]
+
+	-- WoundSystem is the health system: hand the (armor-reduced) hit over before Z-City scales it away
+	if ply and hg.WoundBridge and (ent == ply or ent == ply.FakeRagdoll) and hg.WoundBridge.IsBridged(ply) then
+		local wbHitgroup = hitgroup
+		if ent == ply then
+			-- standing player: the engine hitgroup of the trace (the physics bone of a player trace is meaningless)
+			wbHitgroup = (tr.Entity == ent and tr.HitGroup) or ply:LastHitGroup()
+		end
+
+		hg.WoundBridge.ApplyDamage(ply, dmgInfo, bonename, wbHitgroup,
+			dmg_before / ((ent ~= ply and dmgInfo:IsDamageType(DMG_BULLET) and RagdollDamageBoneMul[hitgroup]) or 1), ent ~= ply)
+	end
 
 	dmgInfo:ScaleDamage(dmgInfo:IsDamageType(DMG_BURN) and 0.015 or 0.15)
 	
@@ -1439,6 +1457,13 @@ local function velocityDamage(ent, data)
 
 	local org = ent.organism
 	if org.godmode then return end
+
+	-- living WoundSystem player in a fake ragdoll: collision damage goes to WoundSystem, the legacy organs stay untouched
+	if ply and ply:Alive() and ply.FakeRagdoll == ent and hg.WoundBridge and hg.WoundBridge.IsBridged(ply) then
+		hg.WoundBridge.ApplyCollision(ply, dmgInfo:GetDamage(), att, bonename, hitgroup, data.HitPos, -(data.OurOldVelocity - data.TheirOldVelocity))
+		return
+	end
+
 	org.fearadd = org.fearadd + dmg * 0.5
 
 	if not org.superfighter then

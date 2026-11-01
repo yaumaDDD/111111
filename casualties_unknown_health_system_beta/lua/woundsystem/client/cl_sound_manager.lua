@@ -311,6 +311,7 @@ if IsValid(LocalPlayer()) then InitializeAudioEngine() end
 
 local function ResetPlayerAudioState(ply)
     if not IsValid(ply) or ply ~= LocalPlayer() then return end
+    if hg and hg.override and hg.override[ply] then return end -- Z-City fake-ragdoll get-up, not a real respawn
 
     CurrentHearingDSP = 0
     if ply.SetDSP then

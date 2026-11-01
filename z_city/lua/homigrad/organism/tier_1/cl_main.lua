@@ -396,6 +396,11 @@ hook.Add("Post Post Pre Post Processing", "organism-effects", function()
 	local immobilization = org.immobilization or 0
 	local incapacitated = org.incapacitated or false
 	local critical = org.critical or false
+
+	-- WoundSystem has its own pain / delirium visuals: keep only the unconscious fade, blood tint and tinnitus
+	if hg.WoundBridge and hg.WoundBridge.IsEnabled and hg.WoundBridge.IsEnabled() then
+		pain, hurt, immobilization, brain, analgesia, disorientation = 0, 0, 0, 0, 0, 0
+	end
 	tinnitusSoundFactor = Lerp(FrameTime()*2.5,tinnitusSoundFactor or 0, math.min(math.max( lply.tinnitus and (lply.tinnitus - CurTime()) or 0, 0)*7.5,120))
 	local tinnitusSoundFactor2 = tinnitusSoundFactor + (hook.Run("ModifyTinnitusFactor", tinnitusSoundFactor) or 0)
 

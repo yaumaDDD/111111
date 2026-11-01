@@ -209,7 +209,7 @@ local surface, draw, hook, IsColor, IsValid, math, input = surface, draw, hook, 
 local function CreateRadialMenu(options_arg, bAutoClose)
 	local sizeX, sizeY = ScrW(), ScrH()
 	hg.radialOptions = {}
-	local paining = lply.organism and lply.organism.pain and (lply.organism.pain > 100 or lply.organism.brain > 0.2) or false
+	local paining = not (hg.WoundBridge and hg.WoundBridge.IsEnabled and hg.WoundBridge.IsEnabled()) and (lply.organism and lply.organism.pain and (lply.organism.pain > 100 or lply.organism.brain > 0.2) or false) -- WoundSystem has its own pain/delirium visuals: the radial menu (and its body examination button) always stays readable
 	
 	if !options_arg then
 		local functions = hook.GetTable()["radialOptions"]

@@ -774,6 +774,7 @@ end)
 
 -- Hook 2: Runs on the client every time a player respawns
 hook.Add("PlayerSpawn", "WoundSystem_RespawnEyeSide", function(ply)
+    if hg and hg.override and hg.override[ply] then return end -- Z-City fake-ragdoll get-up, not a real respawn
     -- Crucial check: Only change the variable if the spawning player is YOU
     if ply == LocalPlayer() then
         WoundSystem.HealthGUI.NoteLocalRespawn()
@@ -2416,11 +2417,13 @@ end
 
 hook.Add("ShouldDrawLocalPlayer", "WoundSystem_HideUnconsciousBody", function(ply)
     if not WoundSystemClientEnabled() then return end
+    if hg and hg.WoundBridge and hg.WoundBridge.IsEnabled() then return end -- Z-City owns the body/camera
     if WoundSystemPlayerUsesUnconsciousBody(ply) then return false end
 end)
 
 hook.Add("PrePlayerDraw", "WoundSystem_HideUnconsciousBody", function(ply)
     if not WoundSystemClientEnabled() then return end
+    if hg and hg.WoundBridge and hg.WoundBridge.IsEnabled() then return end -- Z-City owns the body/camera
     if WoundSystemPlayerUsesUnconsciousBody(ply) then return true end
 end)
 
@@ -3022,6 +3025,7 @@ end
 
 local function WoundSystemUnconsciousEyeView(ply, pos, angles, fov)
     if not WoundSystemClientEnabled() then return end
+    if hg and hg.WoundBridge and hg.WoundBridge.IsEnabled() then return end -- Z-City fake camera is used
     if ply ~= LocalPlayer() or not IsValid(ply) then return end
     if not IsWoundSystemRagdollCameraActive(ply) then return end
 
@@ -3192,6 +3196,7 @@ hook.Add("PreDrawViewModel", "WoundSystem_HideUnconsciousViewModel", function(vm
 end)
 
 hook.Add("PrePlayerDraw", "WoundSystem_HideUnconsciousPlayerModel", function(ply)
+    if hg and hg.WoundBridge and hg.WoundBridge.IsEnabled() then return end -- Z-City owns the body/camera
     if IsValid(ply) and IsWoundSystemRagdollCameraActive(ply) then
         return true
     end
@@ -3209,6 +3214,7 @@ hook.Add("Think", "WoundSystem_ViewModelVisibility", function()
 end)
 
 hook.Add("PlayerSpawn", "WoundSystem_RestoreViewModelOnSpawn", function(ply)
+    if hg and hg.override and hg.override[ply] then return end -- Z-City fake-ragdoll get-up, not a real respawn
     if ply ~= LocalPlayer() then return end
 
     GUIState.forceClearRagdollCameraUntil = CurTime() + 1
@@ -3377,6 +3383,7 @@ local function DrawDeathTopEcg(elapsed)
 end
 
 hook.Add("PlayerSpawn", "WoundSystem_ResetSpawnVisualState", function(ply)
+    if hg and hg.override and hg.override[ply] then return end -- Z-City fake-ragdoll get-up, not a real respawn
     if ply ~= LocalPlayer() then return end
 
     spawnVisualGraceUntil = CurTime() + 3
@@ -5638,6 +5645,7 @@ hook.Add("RenderScreenspaceEffects", "WoundSystem_ChromaticAberration", function
 end, HOOK_HIGH)
 
 hook.Add("PlayerSpawn", "WoundSystem_ResetDeathScreen", function(ply)
+    if hg and hg.override and hg.override[ply] then return end -- Z-City fake-ragdoll get-up, not a real respawn
     if ply == LocalPlayer() then
         WoundSystem.HealthGUI.NoteLocalRespawn()
         WoundSystem.HealthGUI.ResetLocalRespawnInput("respawn")

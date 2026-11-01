@@ -89,6 +89,8 @@ end
 
 if SERVER then
 	function SWEP:Heal(ent, mode)
+		-- WoundSystem (hg.WoundBridge) handles medicine for living players; nil = legacy Z-City code below
+		do local wbr = hg.WoundBridge and hg.WoundBridge.SwepHeal and hg.WoundBridge.SwepHeal(self, ent, mode, bone) if wbr ~= nil then return wbr end end
 		if ent:IsNPC() then
 			self:SpawnGarbage()
 			self:NPCHeal(ent, 0.6, "snd_jack_hmcd_bandage.wav")

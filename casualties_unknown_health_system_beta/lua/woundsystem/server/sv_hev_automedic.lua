@@ -759,6 +759,7 @@ end)
 
 hook.Add("PlayerSpawn", "WoundSystem_HEV_ResetOnSpawn", function(ply)
     if not IsValid(ply) then return end
+    if OverrideSpawn then return end -- Z-City fake-ragdoll get-up, not a real respawn
 
     local inTransition = ply._WoundSystemInChangeLevel == true
         or (ply._WoundSystemChangeLevelTime and (CurTime() - ply._WoundSystemChangeLevelTime) < 5)

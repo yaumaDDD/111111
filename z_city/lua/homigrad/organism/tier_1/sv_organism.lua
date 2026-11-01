@@ -174,6 +174,7 @@ local function send_organism(org, ply)
 	sendtable.incapacitated = org.incapacitated
 	sendtable.berserkActive2 = org.berserkActive2
 	sendtable.noradrenalineActive = org.noradrenalineActive
+	sendtable.wsmovemult = org.wsmovemult -- WoundSystem movement multiplier (woundbridge)
 
 	sendtable.superfighter = org.superfighter
 
@@ -322,6 +323,13 @@ hook.Add("Org Think", "Main", function(owner, org, timeValue)
 	end
 
 	if owner:IsPlayer() and not owner:Alive() then return end
+
+	-- WoundSystem is the health simulation of living players: the legacy organs are not simulated at all,
+	-- `org` is only a shadow that is rewritten from WoundSystem (see homigrad/woundbridge)
+	if owner:IsPlayer() and hg.WoundBridge and hg.WoundBridge.IsBridged(owner) then
+		hg.WoundBridge.Think(owner, org, timeValue)
+		return
+	end
 
 	local isPly = owner:IsPlayer()
 

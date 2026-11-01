@@ -467,6 +467,7 @@ hook.Add("PlayerInitialSpawn", "WoundSystem_HappinessInit", function(ply)
 end)
 
 hook.Add("PlayerSpawn", "WoundSystem_HappinessRespawn", function(ply)
+    if OverrideSpawn then return end -- Z-City fake-ragdoll get-up, not a real respawn
     if not WoundSystemHealthEnabled() then return end
     SetHappiness(ply, 0)
     NegativeRecoveryTicks[ply] = 0
