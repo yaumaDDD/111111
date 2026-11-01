@@ -1,0 +1,17 @@
+{
+  "title": "Casualties: Unknown Health System Beta",
+  "type": "ServerContent",
+  "tags": [
+    "fun",
+    "roleplay",
+    "realism"
+  ],
+  "ignore": [
+    "*.md",
+    "*.meta",
+    "*.hlsl",
+    "*.txt",
+    "*.js",
+    "*.json"
+  ]
+}

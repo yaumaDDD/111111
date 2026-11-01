@@ -1,0 +1,12 @@
+{
+  "title": "Z-City",
+  "type": "gamemode",
+  "tags": [
+    "fun",
+    "realism",
+    "roleplay"
+  ],
+  "ignore": [
+    "*.dll"
+  ]
+}
