@@ -93,3 +93,10 @@ WoundSystem: `server/sv_health.lua` (экспорты `Health.*`, `ApplyItemToBo
 Z-City: `homigrad/woundbridge/*`, `organism/tier_1/sv_input.lua`, `sv_organism.lua`, `cl_main.lua`,
 `movement/sh_inertia.lua`, `cl_hud.lua`, `cl_screeneffects.lua`, `weapons/weapon_{adrenaline,bandage_sh,betablock,
 bigbandage_sh,bloodbag,fentanyl,mannitol,medkit_sh,morphine,naloxone,needle,painkillers,thiamine,tourniquet}.lua`.
+
+## Вывихи (Z-City структура поверх C:U)
+
+- Флаги Z-City `org.llegdislocation / rlegdislocation / larmdislocation / rarmdislocation` теперь считаются из конечностей WoundSystem (`limb.dislocated` у `thigh/crus/foot` и `arm/forearm/hand`, левая и правая сторона). Вывих рождается в WS (удары, падения) и сам заживает по таймеру WS.
+- Радиальные пункты «Fix dislocation» (себе и другим) работают как в Z-City и вызывают `hg_fixdislocation`. Команда в мосте (`WB.FixDislocation`) использует прежнюю формулу шанса (боль фиксера, чужая конечность, `tries`, доктор, присед/рагдолл), а анальгезия берётся из опиатов WS. Успех вправляет все вывихнутые суставы стороны через `SetLimbDislocated(…, false)` и добавляет боль в сустав; неудача — `tries+1`, больше боли, шанс 1/5 ещё сильнее навредить.
+- Штраф движения ×0.75 на каждую вывихнутую ногу и боль при беге остаются (боль уходит в WS-боль конечности); руки блокируют хват в fake-рагдолле, как в Z-City.
+- Челюсть (`jawdislocation`) не поддерживается: в WS её нет.

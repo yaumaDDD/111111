@@ -234,6 +234,14 @@ end
 local armL, armR = {"arm_L", "forearm_L", "hand_L"}, {"arm_R", "forearm_R", "hand_R"}
 local legL, legR = {"thigh_L", "crus_L", "foot_L"}, {"thigh_R", "crus_R", "foot_R"}
 
+local function AnyDislocated(limbs, names)
+	for _, id in ipairs(names) do
+		local l = limbs[id]
+		if type(l) == "table" and l.dislocated and not l.dismembered then return true end
+	end
+	return false
+end
+
 local function MovementMult(H, ply, body)
 	local mult = 1
 	local bf = H.CAS3BodyFeel
@@ -309,9 +317,19 @@ function WB.Sync(ply, org)
 	-- legacy organ hits (bullet trace through the Z-City organs) must not leave anything that Z-City reads as its own health
 	org.spine1, org.spine2, org.spine3 = 0, 0, 0
 	org.pelvis, org.skull, org.chest = 0, 0, 0
-	org.jawdislocation = false
-	org.llegdislocation, org.rlegdislocation = false, false
-	org.larmdislocation, org.rarmdislocation = false, false
+	org.jawdislocation = false -- (WoundSystem has no jaw)
+
+	-- dislocations: the Z-City flags (radial "Fix dislocation", movement, pain, ragdoll arms) follow the C:U limbs
+	local dl, dr, al, ar = false, false, false, false
+	if limbs then
+		dl, dr = AnyDislocated(limbs, legL), AnyDislocated(limbs, legR)
+		al, ar = AnyDislocated(limbs, armL), AnyDislocated(limbs, armR)
+	end
+	if dl ~= org.llegdislocation or dr ~= org.rlegdislocation or al ~= org.larmdislocation or ar ~= org.rarmdislocation then
+		ply.fullsend = true
+	end
+	org.llegdislocation, org.rlegdislocation = dl, dr
+	org.larmdislocation, org.rarmdislocation = al, ar
 
 	-- ragdoll decision of WoundSystem as seen by the Z-City fake code
 	local needfake = body.unconscious or body.fallingRagdoll or (org.llegamputated or org.rlegamputated)
@@ -359,6 +377,118 @@ function WB.ResetOrganism(ent)
 	return true
 end
 
+-----------------------------------------------------------------------------------------------------------------------
+-- DISLOCATIONS  (Z-City structure: radial "Fix dislocation" -> hg_fixdislocation, chance based, tries, pain; C:U limbs)
+-----------------------------------------------------------------------------------------------------------------------
+local DISLOC_GROUPS = {
+	[1] = {{"thigh_L", "crus_L", "foot_L"}, {"thigh_R", "crus_R", "foot_R"}}, -- legs: left first, like Z-City
+	[2] = {{"arm_L", "forearm_L", "hand_L"}, {"arm_R", "forearm_R", "hand_R"}}, -- arms
+}
+
+local unlucky_dislocations = {
+	"Why can't I fix this goddamn dislocation...",
+	"Please... why is it so hard.",
+	"Just go back in place already...",
+	"This is irritating",
+	"I should try again",
+}
+
+local finally_fixed = {"Finally.", "That was harder than I thought", "One dislocation away."}
+
+local function FixDislocatedGroup(target, names, fixer)
+	local H = Health()
+	local limbs = WB.GetLimbs(target)
+	local body = WB.GetBody(target)
+	if not (limbs and body) then return end
+
+	local fixerOrg = fixer.organism or {}
+	local self_fix = fixer == target
+	local analgesia = math.Clamp((body.opiateAmount or 0) / 300, 0, 1.5) -- C:U opiates make the reduction less painful and easier
+
+	-- same odds as Z-City's fixlimb()
+	local roll = math.random(100)
+	local need = 97 + (self_fix and 0 or (fixerOrg.pain or 0)) - analgesia * 50 - (self_fix and 0 or 30) - (fixer.tries or 0) * 10
+		- (fixer.Profession == "doctor" and 100 or 0)
+		- ((self_fix and (IsValid(target.FakeRagdoll) or (target.Crouching and target:Crouching()))) and 10 or 0)
+
+	-- the joint that was put back (or failed to) takes the pain
+	local painId = names[1]
+	for _, id in ipairs(names) do
+		if type(limbs[id]) == "table" and limbs[id].dislocated then painId = id break end
+	end
+
+	local function AddPain(amount)
+		local l = limbs[painId]
+		if type(l) ~= "table" then return end
+		l.pain = math.Clamp((l.pain or 0) + amount, 0, 100)
+		if H.SendLimbUpdate then H.SendLimbUpdate(target, painId, true) end
+	end
+
+	if roll > need then
+		for _, id in ipairs(names) do
+			if H.SetLimbDislocated and type(limbs[id]) == "table" and limbs[id].dislocated then
+				H.SetLimbDislocated(target, id, false, 0, true)
+			end
+		end
+
+		AddPain(5 * math.random(1, 3))
+		target:EmitSound("physics/flesh/flesh_impact_hard6.wav", 65)
+
+		if self_fix and (fixer.tries or 0) > 3 and math.random(3) == 1 and fixer.Notify then
+			fixer:Notify(finally_fixed[math.random(#finally_fixed)], 1, "dislocations_unlucky", 1, nil, Color(255, 255, 255, 255))
+		end
+		fixer.tries = 0
+	else
+		fixer.tries = (fixer.tries or 0) + 1
+		AddPain(12 * math.random(1, 3))
+		target:EmitSound("physics/body/body_medium_impact_soft" .. math.random(7) .. ".wav", 65)
+
+		if fixer.Profession ~= "doctor" and math.random(5) == 1 then
+			AddPain(25) -- clumsy hands hurt it more (Z-City: a club hit on the limb)
+		end
+
+		if self_fix and fixer.tries > 3 and math.random(3) == 1 and fixer.Notify then
+			fixer:Notify(unlucky_dislocations[math.random(#unlucky_dislocations)], 1, "dislocations_unlucky", 1, nil, Color(255, 255, 255, 255))
+		end
+	end
+
+	if target.organism then WB.Sync(target, target.organism) end
+end
+
+--- hg_fixdislocation <1 legs | 2 arms | 3 jaw> [1 = the one the fixer looks at]. Returns true when handled by the bridge.
+function WB.FixDislocation(fixer, args)
+	if not WB.IsEnabled() or not IsValid(fixer) or not fixer:Alive() then return false end
+
+	local ent = fixer
+	if args and args[2] and math.Round(tonumber(args[2]) or 0) == 1 then
+		ent = hg.eyeTrace(fixer).Entity
+	end
+
+	local target = WB.GetPlayer(ent) or ((IsValid(ent) and ent.organism and IsValid(ent.organism.owner) and WB.GetPlayer(ent.organism.owner)) or nil)
+	if not target then return false end
+
+	local forg = fixer.organism
+	if not forg or forg.otrub then return true end
+	if (fixer.tried_fixing_limb or 0) > CurTime() then return true end
+	if not forg.canmove or not forg.canmovehead or (forg.pain or 0) > 60 then return true end
+	fixer.tried_fixing_limb = CurTime() + (forg.pain or 0) / 30
+
+	local groups = DISLOC_GROUPS[math.Round(tonumber(args and args[1]) or 0)]
+	if not groups then return true end -- (jaw: WoundSystem has none)
+
+	local limbs = WB.GetLimbs(target)
+	if not limbs then return true end
+
+	for _, names in ipairs(groups) do
+		if AnyDislocated(limbs, names) then
+			FixDislocatedGroup(target, names, fixer)
+			break
+		end
+	end
+
+	return true
+end
+
 function WB.Think(owner, org, dt)
 	if not IsValid(owner) or not owner:IsPlayer() or not owner:Alive() then return end
 
@@ -367,6 +497,24 @@ function WB.Think(owner, org, dt)
 	if not body then return end
 
 	org.timeValue = dt
+
+	-- Z-City pain of a dislocated leg (running on it writes org.painadd) becomes C:U pain of that limb
+	local pa = org.painadd
+	if pa and pa > 0 and (org.llegdislocation or org.rlegdislocation) then
+		local limbs = WB.GetLimbs(owner)
+		if limbs then
+			local list = {}
+			for _, names in ipairs({legL, legR}) do
+				for _, id in ipairs(names) do
+					if type(limbs[id]) == "table" and limbs[id].dislocated then list[#list + 1] = id end
+				end
+			end
+			for _, id in ipairs(list) do
+				limbs[id].pain = math.Clamp((limbs[id].pain or 0) + pa * 0.5 / #list, 0, 100)
+			end
+		end
+		org.painadd = 0
+	end
 	org.uncon_timer = org.otrub and ((org.uncon_timer or 0) + dt) or 0
 
 	local justWentUncon = org.otrub and not wasOtrub

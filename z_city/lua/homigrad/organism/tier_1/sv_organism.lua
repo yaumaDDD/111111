@@ -826,6 +826,9 @@ end
 concommand.Add("hg_fixdislocation", function(ply, cmd, args)
 	local fixer = ply
 
+	-- WoundSystem (hg.WoundBridge) owns the dislocations: same radial options and odds, C:U limbs
+	if hg.WoundBridge and hg.WoundBridge.FixDislocation and hg.WoundBridge.FixDislocation(fixer, args) then return end
+
 	if args and args[2] and math.Round(tonumber(args[2])) == 1 then
 		ply = hg.eyeTrace(fixer).Entity
 	end
