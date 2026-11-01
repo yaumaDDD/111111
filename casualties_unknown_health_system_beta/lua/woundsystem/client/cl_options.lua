@@ -120,10 +120,8 @@ local CLIENT_PRESET_CVARS = {
     "woundsys_pain_sounds_enabled",
     "woundsys_death_sounds_enabled",
     "woundsys_growl_sounds_enabled",
-    "woundsys_self_talk_enabled",
     "woundsys_face_expressions_enabled",
     "woundsys_face_voice_mouth",
-    "woundsys_face_self_talk_mouth",
     "woundsys_face_expression_distance",
     "woundsys_woundview_key",
     "woundsys_bodyuse_key"
@@ -151,23 +149,6 @@ local SERVER_OPTIONS = {
     {label = "Replace vanilla blood", cvar = "woundsys_replace_vanilla_blood", kind = "bool"},
     {label = "Server pain vocalizations", cvar = "woundsys_server_pain_sounds_enabled", kind = "bool"},
     {label = "Server growls/whines/barking", cvar = "woundsys_server_growl_sounds_enabled", kind = "bool"},
-    {label = "HEV functionality enabled", cvar = "woundsys_hev_enabled", kind = "bool"},
-    {label = "Distance chat distortion", cvar = "woundsys_chat_distortion_enabled", kind = "bool"},
-    {label = "Chat clear distance", cvar = "woundsys_chat_distortion_close", min = 0, max = 3000, decimals = 0},
-    {label = "Chat unreadable distance", cvar = "woundsys_chat_distortion_far", min = 100, max = 10000, decimals = 0},
-    {label = "Chat distortion curve", cvar = "woundsys_chat_distortion_power", min = 0.25, max = 4, decimals = 2},
-    {label = "Chat wall distortion", cvar = "woundsys_chat_distortion_wall", min = 0, max = 1, decimals = 2},
-    {label = "Chat wall minimum", cvar = "woundsys_chat_distortion_wall_min", min = 0, max = 1, decimals = 2},
-    {label = "Proximity voice", cvar = "woundsys_voice_proximity_enabled", kind = "bool"},
-    {label = "Voice full-volume distance", cvar = "woundsys_voice_proximity_near", min = 0, max = 3000, decimals = 0},
-    {label = "Voice maximum distance", cvar = "woundsys_voice_proximity_far", min = 100, max = 10000, decimals = 0},
-    {label = "Voice minimum volume", cvar = "woundsys_voice_proximity_min_volume", min = 0, max = 1, decimals = 2},
-    {label = "Voice falloff curve", cvar = "woundsys_voice_proximity_power", min = 0.25, max = 4, decimals = 2},
-    {label = "Voice wall multiplier", cvar = "woundsys_voice_proximity_wall_muffle", min = 0, max = 1, decimals = 2},
-    {label = "Voice wall check seconds", cvar = "woundsys_voice_proximity_wall_check_interval", min = 0, max = 2, decimals = 2},
-    {label = "Dead players can talk", cvar = "woundsys_voice_proximity_dead_talk", kind = "bool"},
-    {label = "Unconscious players can talk", cvar = "woundsys_voice_proximity_unconscious_talk", kind = "bool"},
-    {label = "Same-team voice bypass", cvar = "woundsys_voice_proximity_team_bypass", kind = "bool"},
     {label = "Limb force enabled", cvar = "woundsys_limb_force_enabled", kind = "bool"},
     {label = "Limb force movement scale", cvar = "woundsys_limb_force_movement_scale", min = 0, max = 2, decimals = 2},
     {label = "Limb force weapon threshold", cvar = "woundsys_limb_force_weapon_threshold", min = 0, max = 1, decimals = 2},
@@ -176,8 +157,6 @@ local SERVER_OPTIONS = {
     {label = "Brain symptom interval", cvar = "woundsys_brain_symptom_interval", min = 5, max = 120, decimals = 0},
     {label = "Brain symptom threshold", cvar = "woundsys_brain_symptom_threshold", min = 0, max = 100, decimals = 0},
     {label = "Brain ragdoll symptoms", cvar = "woundsys_brain_ragdoll_symptoms", kind = "bool"},
-    {label = "Happiness enabled", cvar = "woundsys_happiness_enabled", kind = "bool"},
-    {label = "Happiness ally radius", cvar = "woundsys_happiness_ally_radius", min = 1, max = 5000, decimals = 0},
     {label = "Auto-speedup when unconscious", cvar = "woundsys_unconscious_timescale_enabled", kind = "bool"},
     {label = "Unconscious speedup multiplier", cvar = "woundsys_unconscious_timescale", min = 1, max = 10, decimals = 1},
     {label = "Force everyone unchipped", cvar = "woundsys_force_unchipped", kind = "bool"},
@@ -344,12 +323,10 @@ local function BuildClientPanel(panel)
     panel:CheckBox("Enable pain vocalizations", "woundsys_pain_sounds_enabled")
     panel:CheckBox("Enable death vocalizations", "woundsys_death_sounds_enabled")
     panel:CheckBox("Enable unhappy growls", "woundsys_growl_sounds_enabled")
-    panel:CheckBox("Enable quoted self-talk chat", "woundsys_self_talk_enabled")
 
     AddHelp(panel, "Flex-based facial feedback for supported playermodels.")
     panel:CheckBox("Facial expressions", "woundsys_face_expressions_enabled")
     panel:CheckBox("Voice mouth movement", "woundsys_face_voice_mouth")
-    panel:CheckBox("Self-talk mouth movement", "woundsys_face_self_talk_mouth")
     panel:NumSlider("Face update distance", "woundsys_face_expression_distance", 256, 6000, 0)
 
     AddHelp(panel, "Symptom moodles. Anchor accepts topleft, topright, bottomleft, bottomright, centerleft, or centerright. Disable entries with comma-separated moodle ids.")
@@ -596,242 +573,6 @@ local function BuildServerPanel(panel)
     panel:AddItem(applyButton)
 end
 
-local function GetMedicalSpawnerItems()
-    local items = {}
-    local registry = WoundSystem.Items
-    if not registry then return items end
-
-    local seen = {}
-    for _, itemId in ipairs(registry.Order or {}) do
-        local item = registry.Get and registry.Get(itemId) or (registry.Stored and registry.Stored[itemId])
-        if item and item.world ~= false and not seen[item.id or itemId] then
-            seen[item.id or itemId] = true
-            items[#items + 1] = item
-        end
-    end
-
-    if registry.Stored then
-        for id, item in pairs(registry.Stored) do
-            if item and item.world ~= false and not seen[item.id or id] then
-                seen[item.id or id] = true
-                items[#items + 1] = item
-            end
-        end
-    end
-
-    table.sort(items, function(a, b)
-        return string.lower(a.title or a.id or "") < string.lower(b.title or b.id or "")
-    end)
-
-    return items
-end
-
-local function MedicalSpawnerMatches(item, query)
-    if query == "" then return true end
-
-    local haystack = string.lower(table.concat({
-        tostring(item.id or ""),
-        tostring(item.title or ""),
-        tostring(item.desc or "")
-    }, " "))
-
-    return string.find(haystack, query, 1, true) ~= nil
-end
-
-local function GetMedicalSpawnerIconMaterial(iconPath)
-    if not iconPath or iconPath == "" then return nil end
-
-    local paddedPath = string.gsub(iconPath, "%.png$", "_padded.png")
-    if file.Exists("materials/" .. paddedPath, "GAME") then
-        return Material(paddedPath)
-    end
-
-    return Material(iconPath)
-end
-
-local function CreateMedicalSpawnerRow(parent, item)
-    local itemId = item.id or ""
-    local title = item.title or itemId
-    local desc = item.desc or ""
-    local maxDurability = WoundSystem.Items and WoundSystem.Items.GetMax and WoundSystem.Items.GetMax(itemId) or (tonumber(item.max) or 100)
-    maxDurability = math.max(tonumber(maxDurability) or 100, 1)
-    local iconWide = math.max(tonumber(item.pw) or 30, 1)
-    local iconTall = math.max(tonumber(item.ph) or 30, 1)
-    local iconScale = math.min(56 / iconWide, 56 / iconTall)
-    local drawWide = math.floor(iconWide * iconScale)
-    local drawTall = math.floor(iconTall * iconScale)
-    local iconMaterial = GetMedicalSpawnerIconMaterial(item.icon)
-
-    local row = parent:Add("DPanel")
-    row:SetTall(154)
-    row:DockMargin(0, 0, 8, 8)
-    row.Paint = function(_, w, h)
-        surface.SetDrawColor(32, 35, 40, 248)
-        surface.DrawRect(0, 0, w, h)
-        surface.SetDrawColor(72, 80, 92, 255)
-        surface.DrawOutlinedRect(0, 0, w, h)
-    end
-
-    local controls = row:Add("DPanel")
-    controls:Dock(BOTTOM)
-    controls:DockMargin(8, 0, 8, 8)
-    controls:SetTall(50)
-    controls.Paint = nil
-
-    local header = row:Add("DPanel")
-    header:Dock(FILL)
-    header:DockMargin(8, 8, 8, 6)
-    header.Paint = nil
-
-    local iconBox = header:Add("DPanel")
-    iconBox:Dock(LEFT)
-    iconBox:DockMargin(0, 0, 10, 0)
-    iconBox:SetWide(62)
-    iconBox.Paint = function(_, w, h)
-        surface.SetDrawColor(18, 20, 24, 255)
-        surface.DrawRect(0, 0, w, h)
-        surface.SetDrawColor(88, 98, 112, 255)
-        surface.DrawOutlinedRect(0, 0, w, h)
-
-        if iconMaterial and not iconMaterial:IsError() then
-            surface.SetMaterial(iconMaterial)
-            surface.SetDrawColor(255, 255, 255, 255)
-            surface.DrawTexturedRect(math.floor((w - drawWide) * 0.5), math.floor((h - drawTall) * 0.5), drawWide, drawTall)
-        end
-    end
-
-    local text = header:Add("DPanel")
-    text:Dock(FILL)
-    text.Paint = nil
-
-    local nameLabel = text:Add("DLabel")
-    nameLabel:Dock(TOP)
-    nameLabel:SetTall(18)
-    nameLabel:SetText(title)
-    nameLabel:SetTextColor(Color(245, 248, 252))
-    nameLabel:SetFont("DermaDefaultBold")
-
-    local idLabel = text:Add("DLabel")
-    idLabel:Dock(TOP)
-    idLabel:SetTall(16)
-    idLabel:SetText(itemId)
-    idLabel:SetTextColor(Color(125, 185, 255))
-
-    local descLabel = text:Add("DLabel")
-    descLabel:Dock(FILL)
-    descLabel:DockMargin(0, 4, 0, 0)
-    descLabel:SetText(desc ~= "" and desc or "No description.")
-    descLabel:SetTextColor(Color(205, 212, 222))
-    descLabel:SetWrap(true)
-    descLabel:SetAutoStretchVertical(true)
-
-    local valueLabel = controls:Add("DLabel")
-    valueLabel:Dock(TOP)
-    valueLabel:SetTall(18)
-    valueLabel:SetTextColor(Color(225, 230, 238))
-    valueLabel:SetFont("DermaDefaultBold")
-
-    local spawnButton = controls:Add("DButton")
-    spawnButton:Dock(RIGHT)
-    spawnButton:DockMargin(8, 4, 0, 0)
-    spawnButton:SetWide(72)
-    spawnButton:SetText("Spawn")
-    spawnButton:SetTextColor(Color(255, 255, 255))
-    spawnButton.Paint = function(self, w, h)
-        local hovered = self:IsHovered()
-        surface.SetDrawColor(hovered and 72 or 54, hovered and 145 or 116, hovered and 235 or 205, 255)
-        surface.DrawRect(0, 0, w, h)
-        surface.SetDrawColor(118, 175, 245, 255)
-        surface.DrawOutlinedRect(0, 0, w, h)
-    end
-
-    local durability = controls:Add("DSlider")
-    durability:Dock(FILL)
-    durability:DockMargin(0, 6, 0, 4)
-    durability:SetLockY(0.5)
-
-    local chosenDurability = maxDurability
-    local function SetChosenDurability(value)
-        chosenDurability = math.Clamp(math.Round(tonumber(value) or maxDurability), 1, maxDurability)
-        valueLabel:SetText("Durability  " .. tostring(chosenDurability) .. " / " .. tostring(math.floor(maxDurability)))
-    end
-
-    durability.OnValueChanged = function(_, x)
-        SetChosenDurability(1 + (x * (maxDurability - 1)))
-    end
-
-    durability:SetSlideX(1)
-    SetChosenDurability(maxDurability)
-
-    spawnButton.DoClick = function()
-        net.Start("WoundSystem_SpawnMedicalItem")
-            net.WriteString(itemId)
-            net.WriteFloat(chosenDurability)
-        net.SendToServer()
-
-        chat.AddText(Color(120, 255, 160), "[WoundSystem] Requested " .. title .. ".")
-    end
-end
-
-local function BuildMedicalSpawnerPanel(panel)
-    panel:ClearControls()
-    AddHelp(panel, "Playtest spawner for exact C:U medical items. Everyone can request these items on servers running this addon.")
-
-    local searchContainer = vgui.Create("DPanel")
-    searchContainer:SetTall(26)
-    searchContainer.Paint = nil
-    panel:AddItem(searchContainer)
-
-    local clearBtn = vgui.Create("DButton", searchContainer)
-    clearBtn:Dock(RIGHT)
-    clearBtn:SetWide(54)
-    clearBtn:DockMargin(4, 0, 0, 0)
-    clearBtn:SetText("Clear")
-
-    local search = vgui.Create("DTextEntry", searchContainer)
-    search:Dock(FILL)
-    search:SetPlaceholderText("Search medical items (e.g. gauze, blood, aed, morphine)")
-    search:SetUpdateOnType(true)
-
-    local scroll = vgui.Create("DScrollPanel")
-    scroll:SetTall(math.max(ScrH() - 280, 560))
-    panel:AddItem(scroll)
-
-    local list = scroll:Add("DListLayout")
-    list:Dock(FILL)
-
-    local items = GetMedicalSpawnerItems()
-
-    local function RefreshList()
-        local query = string.lower(string.Trim(search:GetValue() or ""))
-        list:Clear()
-
-        local shown = 0
-        for _, item in ipairs(items) do
-            if MedicalSpawnerMatches(item, query) then
-                CreateMedicalSpawnerRow(list, item)
-                shown = shown + 1
-            end
-        end
-
-        if shown <= 0 then
-            local empty = list:Add("DLabel")
-            empty:SetTall(32)
-            empty:SetText("No matching medical items found.")
-            empty:SetDark(true)
-        end
-    end
-
-    search.OnValueChange = RefreshList
-    search.OnChange = RefreshList
-    clearBtn.DoClick = function()
-        search:SetText("")
-        search:SetValue("")
-        RefreshList()
-    end
-
-    RefreshList()
-end
 
 
 -- ============================================================
@@ -1026,6 +767,5 @@ end
 hook.Add("PopulateToolMenu", "WoundSystem_OptionsMenu", function()
     spawnmenu.AddToolMenuOption("Options", "doggo's addons", "WoundSystem_Client", "C:U Health System - Client", "", "", BuildClientPanel)
     spawnmenu.AddToolMenuOption("Options", "doggo's addons", "WoundSystem_Server", "C:U Health System - Server", "", "", BuildServerPanel)
-    spawnmenu.AddToolMenuOption("Options", "doggo's addons", "WoundSystem_MedicalSpawner", "C:U Medical Item Spawner", "", "", BuildMedicalSpawnerPanel)
     spawnmenu.AddToolMenuOption("Options", "doggo's addons", "WoundSystem_AdminDebug", "C:U Health System - Admin Debug", "", "", BuildAdminDebugPanel)
 end)
