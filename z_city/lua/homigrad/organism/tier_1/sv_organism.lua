@@ -714,13 +714,19 @@ end)
 concommand.Add("hg_organism_clear", function(ply, cmd, args)
 	if not ply:IsAdmin() then return end
 
+	local function reset(pl)
+		if not (hg.WoundBridge and hg.WoundBridge.ResetOrganism and hg.WoundBridge.ResetOrganism(pl)) then
+			hg.organism.Clear(pl.organism)
+		end
+	end
+
 	if not args[1] then
-		hg.organism.Clear(ply.organism)
+		reset(ply)
 	end
 
 	if args[1] then
 		for i,pl in pairs(player.GetListByName(args[1])) do
-			hg.organism.Clear(pl.organism)
+			reset(pl)
 		end
 	end
 end)

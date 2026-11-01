@@ -163,7 +163,9 @@ properties.Add( "reset_org", {
 		if ( !self:Filter( ent, ply ) ) then return end
         ent = hg.RagdollOwner( ent ) or ent
         
-		hg.organism.Clear( ent.organism )
+		if not (hg.WoundBridge and hg.WoundBridge.ResetOrganism and hg.WoundBridge.ResetOrganism(ent)) then
+			hg.organism.Clear( ent.organism )
+		end
 		print(tostring(ply:Nick() or ply) .." reset the health of ".. tostring(ent:Nick() or ent))
 	end 
 } )

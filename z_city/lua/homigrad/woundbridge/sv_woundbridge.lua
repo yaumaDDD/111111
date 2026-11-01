@@ -329,6 +329,36 @@ end
 -- THINK  (replaces the legacy `Org Think` "Main" hook for players)
 -----------------------------------------------------------------------------------------------------------------------
 
+--- "Reset organism" (admin tool / console): a fresh WoundSystem body + limbs, the Z-City side state is cleared too.
+--- Returns true when WoundSystem handled it (otherwise the caller falls back to the legacy hg.organism.Clear).
+function WB.ResetOrganism(ent)
+	if not WB.IsEnabled() then return false end
+
+	local ply = WB.GetPlayer(ent) or (IsValid(ent) and ent:IsPlayer() and ent:Alive() and ent) or nil
+	if not ply then return false end
+
+	local H = Health()
+	if not (H and H.ResetPlayer) or not H.ResetPlayer(ply) then return false end
+
+	local org = ply.organism
+	if org then
+		hg.organism.Clear(org) -- legacy hooks: handcuffs, poisons, taser, virus ...
+		WB.Sync(ply, org)
+		org.needotrub, org.otrub, org.needfake, org.fake = false, false, false, false
+	end
+
+	-- stand up if the old state kept him on the floor
+	WB.RestoreRagdoll(ply, WB.GetBody(ply), false)
+
+	ply.fullsend = true
+	if org then
+		hg.send_bareinfo(org)
+		hg.send_organism(org, ply)
+	end
+
+	return true
+end
+
 function WB.Think(owner, org, dt)
 	if not IsValid(owner) or not owner:IsPlayer() or not owner:Alive() then return end
 
@@ -746,9 +776,9 @@ end
 --[[
 	Minigame use.  The WoundSystem bandage / syringe minigame opens on the user's screen (WoundSystem.Health.StartExternalMinigame);
 	it only measures what the player did. The effect is applied to the TARGET after the minigame was completed:
-	  bandage  at least one full wrap (or the whole bandage used)
-	  syringe  the plunger pushed through (>= 90% of the dose)
-	Closing it early / a broken needle / timeout = nothing is applied and nothing is used up.
+	  bandage  every wrap counts; the bandage is used up by exactly the amount worked in (it may not cover the whole wound)
+	  syringe  the dose is whatever part of the syringe was pushed in (the rest stays in the item)
+	Nothing done / a broken needle / death = nothing is applied and nothing is used up.
 ]]
 local function StartMinigame(swep, spec, idx, target, limbId)
 	local H = Health()
@@ -788,43 +818,50 @@ local function StartMinigame(swep, spec, idx, target, limbId)
 				return
 			end
 
+			-- Whatever the player really did is applied, nothing more and nothing less:
+			--   bandage  the wraps made (the bandage is used up by exactly that much, an empty one is removed)
+			--   syringe  the part of the dose that was pushed (a half-pushed syringe = half a dose, the rest stays in it)
 			local used, start = session.deferredUsed or 0, session.startAmount or 0
-			local passed
-			if mg.kind == "bandage" then
-				passed = (session.deferredWrap or 0) >= 1 or used >= start - 0.05
-			else
-				passed = used >= start * 0.9
-			end
+			local frac = start > 0 and math.Clamp(used / start, 0, 1) or 0
 
-			if used <= 0 or not passed then
+			if used <= 0.01 or frac <= 0.005 then
 				if IsValid(ply) then ply:PrintMessage(HUD_PRINTCENTER, "Not completed - nothing was applied") end
 				return
 			end
 
 			if not WB.IsBridged(target) then return end
 
+			local oneDose = spec.oneshot or mg.vehicle or spec.kind == "apply" or spec.kind == "body"
 			local ok
+
 			if spec.kind == "body" then
 				local body = WB.GetBody(target)
 				if body then
-					spec.fn(target, body, 1)
+					spec.fn(target, body, frac) -- the effect scales with the dose given
 					if H.SendCardioUpdate then H.SendCardioUpdate(target) end
 					ok = true
 				end
+			elseif spec.item == "INJECTION" then
+				-- a chest drain is not a dose: it only works when it was really inserted
+				if frac >= 0.9 then ok = H.ApplyItemToBody(target, spec.item, limbId, 100) end
 			elseif spec.kind == "apply" or mg.vehicle then
-				ok = H.ApplyItemToBody(target, spec.item, limbId, 100)
-			elseif spec.oneshot then
-				ok = H.ApplyItemToBody(target, spec.item, limbId, start)
+				-- the real item is carried by a syringe: scale its per-use dose
+				local itemDef = WoundSystem.Items and WoundSystem.Items.Get and WoundSystem.Items.Get(spec.item)
+				local perUse = itemDef and itemDef.use and tonumber(itemDef.use.consumeDurability) or (itemDef and itemDef.max) or 100
+				ok = H.ApplyItemToBody(target, spec.item, limbId, perUse * frac, {partial = true})
 			else
 				ok = H.ApplyItemToBody(target, spec.item, limbId, used)
 			end
 
-			if not ok then return end
+			if not ok then
+				if IsValid(ply) then ply:PrintMessage(HUD_PRINTCENTER, "Not completed - nothing was applied") end
+				return
+			end
 
 			if IsValid(swep) then
-				local oneDose = spec.oneshot or mg.vehicle or spec.kind == "apply" or spec.kind == "body"
 				if oneDose then
-					swep.modeValues[idx] = 0
+					local left = Remaining(swep, idx) * (1 - frac)
+					swep.modeValues[idx] = (frac >= 0.97 or left <= 0.0005) and 0 or left
 				else
 					Consume(swep, idx, used / math.max(maxDur, 1) * def)
 				end

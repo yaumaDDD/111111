@@ -8831,6 +8831,29 @@ WoundSystem.Health.Const = Const
 WoundSystem.Health.RagdollBoneNameToLimb = RagdollBoneNameToLimb
 WoundSystem.Health.SendCardioUpdate = function(ply, ...) if SendCardioUpdate then return SendCardioUpdate(ply, ...) end end
 
+-- Brand new body and limbs, like after a respawn (used by the Z-City "Reset organism" tool). Inventory is kept.
+function WoundSystem.Health.ResetPlayer(ply)
+    if not WoundSystemHealthEnabled() or not IsValid(ply) or not ply:IsPlayer() then return false end
+
+    CloseShrapnelSession(ply, "respawn")
+    CloseDislocationSession(ply, "respawn")
+    CloseBandageSession(ply, "respawn")
+    CloseSyringeSession(ply, "respawn")
+    CloseAedSession(ply, "respawn")
+
+    InitPlayer(ply)
+
+    ResetClientLimbs(ply)
+    SendCardioUpdate(ply, true)
+    SendDismembermentVisualReset(ply)
+    SendDismembermentVisuals(ply)
+    timer.Simple(1, function()
+        if IsValid(ply) then SendAllDismembermentVisuals(ply) end
+    end)
+
+    return true
+end
+
 -----------------------------------------------------------
 -- Z-City integration API: apply a medical item (used by Z-City SWEPs) directly to a player's limb,
 -- without the inventory / minigame UI.
