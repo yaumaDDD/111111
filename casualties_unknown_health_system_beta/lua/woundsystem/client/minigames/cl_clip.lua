@@ -25,6 +25,13 @@ Clip.EdgeAlpha = Clip.EdgeAlpha or CreateClientConVar("woundsys_minigame_clip_ed
 Clip.EdgeSize = Clip.EdgeSize or CreateClientConVar("woundsys_minigame_clip_edge_size", "34", true, false, "Pixel spread of faded rounded edges outside the minigame clip at 1080p.", 0, 128)
 Clip.HeaderPanelAlpha = Clip.HeaderPanelAlpha or CreateClientConVar("woundsys_minigame_header_panel_alpha", "210", true, false, "Alpha for the full-square minigame header guide panel.", 0, 255)
 
+Clip.Fullscreen = Clip.Fullscreen or CreateClientConVar("woundsys_minigame_fullscreen", "1", true, false, "Minigames (bandage, syringe...) use the whole screen: dark backdrop, no clipping frame, no hint text.", 0, 1)
+Clip.FullscreenAlpha = Clip.FullscreenAlpha or CreateClientConVar("woundsys_minigame_fullscreen_alpha", "235", true, false, "Backdrop darkness of full screen minigames.", 0, 255)
+
+function Clip.IsFullscreen()
+    return Clip.Fullscreen:GetBool()
+end
+
 Clip.HeaderIconCache = Clip.HeaderIconCache or {}
 Clip.ExtraSize = 60
 Clip.ExitGuide = Clip.ExitGuide or "Press RMB/ESC to exit"
@@ -66,6 +73,10 @@ function Clip.Scale()
 end
 
 function Clip.GetRect()
+    if Clip.IsFullscreen() then
+        return 0, 0, ScrW(), ScrH(), 0
+    end
+
     local scale = Clip.Scale()
     local size = math.max(tonumber(Clip.Size:GetFloat()) or 760, 64) * scale + (Clip.ExtraSize * scale)
     local x = (ScrW() - size) * 0.5 + (Clip.OffsetX:GetFloat() * scale)
@@ -82,9 +93,17 @@ local function FadeFor(openTime, fadeTime)
 end
 
 function Clip.DrawBackdrop(data)
+    data = data or {}
+
+    if Clip.IsFullscreen() then
+        local fade = FadeFor(data.openTime, data.fadeTime)
+        surface.SetDrawColor(0, 0, 0, math.Clamp(Clip.FullscreenAlpha:GetFloat() * fade, 0, 255))
+        surface.DrawRect(0, 0, ScrW(), ScrH())
+        return
+    end
+
     if not Clip.BackdropEnabled:GetBool() then return end
 
-    data = data or {}
     local x, y, w, h, radius = Clip.GetRect()
     local scale = Clip.Scale()
     local fade = FadeFor(data.openTime, data.fadeTime)
@@ -122,6 +141,7 @@ local function BeginScissor(x, y, w, h)
 end
 
 function Clip.Begin()
+    if Clip.IsFullscreen() then return false end -- the whole screen is the playfield
     if not Clip.Enabled:GetBool() then return false end
     if not render then return false end
 
@@ -250,8 +270,49 @@ local function DrawCenteredMultiline(text, font, x, y, maxW, color, lineGap)
     end
 end
 
+-- Full screen: only what is left of the item (icon + percent), no title, no hint text.
+local function DrawFullscreenHeader(data)
+    local scale = Clip.Scale()
+    local value = tostring(data.value or "")
+    local maxValue = tonumber(data.maxValue) or 100
+    local curValue = tonumber(data.curValue) or maxValue
+    local pct = maxValue > 0 and math.Clamp(curValue / maxValue, 0, 1) or 0
+    local font = (WoundSystemGetFont and WoundSystemGetFont("RetroTooltipTitle", scale)) or "RetroTooltipTitle"
+
+    local iconW = math.Round((tonumber(data.pw) or 30) * scale)
+    local iconH = math.Round((tonumber(data.ph) or 30) * scale)
+    local mat = data.mat or GetIconMaterial(data.icon)
+    local hasIcon = mat and not mat:IsError()
+
+    surface.SetFont(font)
+    local textW, textH = surface.GetTextSize(value)
+    local gap = hasIcon and math.Round(10 * scale) or 0
+    local pad = math.Round(10 * scale)
+    local boxW = pad * 2 + (hasIcon and iconW or 0) + gap + textW
+    local boxH = math.max(hasIcon and iconH or 0, textH) + pad * 2
+    local x = math.Round(ScrW() * 0.5 - boxW * 0.5)
+    local y = math.Round(24 * scale)
+
+    draw.RoundedBox(math.Round(8 * scale), x, y, boxW, boxH, Color(10, 10, 11, 200))
+
+    if hasIcon then
+        surface.SetMaterial(mat)
+        surface.SetDrawColor(255, 255, 255, 235)
+        surface.DrawTexturedRect(x + pad, y + (boxH - iconH) * 0.5, iconW, iconH)
+    end
+
+    if value ~= "" then
+        draw.SimpleText(value, font, x + pad + (hasIcon and (iconW + gap) or 0), y + boxH * 0.5, data.valueColor or HSVToColor(pct * 120, 0.8, 0.9), TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+    end
+end
+
 function Clip.DrawHeader(data)
     data = data or {}
+
+    if Clip.IsFullscreen() then
+        DrawFullscreenHeader(data)
+        return
+    end
 
     local scale = Clip.Scale()
     local clipX, clipY, clipW, clipH, clipRadius = Clip.GetRect()
@@ -320,6 +381,8 @@ function Clip.DrawHeader(data)
 end
 
 function Clip.DrawExitGuide()
+    if Clip.IsFullscreen() then return end -- no hint text in full screen mode
+
     local scale = Clip.Scale()
     local fontExit = (WoundSystemGetFont and WoundSystemGetFont("RetroTooltipTitle", scale)) or "RetroTooltipTitle"
     draw.SimpleText(CorruptUIText(Clip.ExitGuide or "Press RMB/ESC to exit"), fontExit, ScrW() / 2, ScrH() * 0.92, Color(255, 255, 255, 255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)

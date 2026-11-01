@@ -5272,6 +5272,11 @@ net.Receive("WoundSystem_BandageInput", function(_, ply)
         -- Z-City SWEP: only measure the work, the effect is applied when the minigame is completed
         session.deferredUsed = (session.deferredUsed or 0) + durCost
         session.deferredWrap = (session.deferredWrap or 0) + wrapFraction
+        if type(session.onProgress) == "function" then
+            local ok, err = pcall(session.onProgress, ply, session, durCost, wrapFraction)
+            if not ok then ErrorNoHalt("[WoundSystem] external minigame onProgress failed: " .. tostring(err) .. "\n") end
+        end
+        if Sessions.Bandage[ply] ~= session then return end -- onProgress ended the minigame
         SendMinigameAck(ply, MINIGAME_ACK_BANDAGE, session)
         return
     end
@@ -5443,6 +5448,11 @@ net.Receive("WoundSystem_SyringeInput", function(_, ply)
     if session.deferred then
         -- Z-City SWEP: only measure the injected amount, the effect is applied when the minigame is completed
         session.deferredUsed = (session.deferredUsed or 0) + durCost
+        if type(session.onProgress) == "function" then
+            local ok, err = pcall(session.onProgress, ply, session, durCost)
+            if not ok then ErrorNoHalt("[WoundSystem] external minigame onProgress failed: " .. tostring(err) .. "\n") end
+        end
+        if Sessions.Syringe[ply] ~= session then return end -- onProgress ended the minigame
         SendSyringeState(ply, session)
 
         local left = ValidateToolSlot(ply, slotIdx, itemId)
@@ -8564,6 +8574,7 @@ function WoundSystem.Health.StartExternalMinigame(ply, spec)
         deferredWrap = 0,
         startAmount = amount,
         onClose = spec.onClose,
+        onProgress = spec.onProgress,
     }
 
     SyncInventoryToClient(ply) -- the client minigame reads the item from its inventory mirror
@@ -8586,6 +8597,12 @@ function WoundSystem.Health.StartExternalMinigame(ply, spec)
     end
 
     return true
+end
+
+function WoundSystem.Health.StopExternalMinigame(ply, reason)
+    local b, s = Sessions.Bandage[ply], Sessions.Syringe[ply]
+    if b and b.external then CloseBandageSession(ply, reason or "stopped") end
+    if s and s.external then CloseSyringeSession(ply, reason or "stopped") end
 end
 
 function WoundSystem.Health.HasExternalMinigame(ply)
