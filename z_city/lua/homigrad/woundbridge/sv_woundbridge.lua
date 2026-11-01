@@ -317,8 +317,6 @@ function WB.Sync(ply, org)
 	-- legacy organ hits (bullet trace through the Z-City organs) must not leave anything that Z-City reads as its own health
 	org.spine1, org.spine2, org.spine3 = 0, 0, 0
 	org.pelvis, org.skull, org.chest = 0, 0, 0
-	org.jawdislocation = false -- (WoundSystem has no jaw)
-
 	-- dislocations: the Z-City flags (radial "Fix dislocation", movement, pain, ragdoll arms) follow the C:U limbs
 	local dl, dr, al, ar = false, false, false, false
 	if limbs then
@@ -455,7 +453,7 @@ local function FixDislocatedGroup(target, names, fixer)
 	if target.organism then WB.Sync(target, target.organism) end
 end
 
---- hg_fixdislocation <1 legs | 2 arms | 3 jaw> [1 = the one the fixer looks at]. Returns true when handled by the bridge.
+--- hg_fixdislocation <1 legs | 2 arms> [1 = the one the fixer looks at]. Returns true when handled by the bridge.
 function WB.FixDislocation(fixer, args)
 	if not WB.IsEnabled() or not IsValid(fixer) or not fixer:Alive() then return false end
 
@@ -474,7 +472,7 @@ function WB.FixDislocation(fixer, args)
 	fixer.tried_fixing_limb = CurTime() + (forg.pain or 0) / 30
 
 	local groups = DISLOC_GROUPS[math.Round(tonumber(args and args[1]) or 0)]
-	if not groups then return true end -- (jaw: WoundSystem has none)
+	if not groups then return true end
 
 	local limbs = WB.GetLimbs(target)
 	if not limbs then return true end

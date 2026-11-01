@@ -66,28 +66,11 @@ local function funca(ply, txt)
 		txt = table.Random(hg.sharp_pain)
 	end
 
-	local bJawBroken = ply.organism.jaw == 1 or ply.organism.jawdislocation
 	local bUnintelligeble = ply.organism.brain > 0.05
 	local bHasMassiveBrainDamage = ply.organism.brain > 0.14
 
 	txt = utf8.force(txt)
 
-	if bJawBroken then
-		local iter = utf8.codes(txt)
-		local len = 0
-		local chars = {}
-		local minus = utf8.codepoint("-", 1, 1)
-		for i, code in iter do
-			if math.random(3) == 1 then -- max dist 640
-				code = minus
-			end
-
-			len = len + 1
-			chars[len] = utf8.char(code)
-		end
-		txt = table.concat(chars)
-	end
-	
 	if bUnintelligeble then
 		local iter = utf8.codes(txt)
 		local len = 0

@@ -119,7 +119,6 @@ hook.Add("Think", "Abnormalties_Heal", function()
 				owner.organism.spineartery = 0
 				owner.organism.brain = 0
 				owner.organism.heartstop = false
-				owner.organism.jaw = 0
 				owner.AbnormaltiesHealGrace = (owner.AbnormaltiesHealGrace or CurTime()) + 120
 				
 				owner:SetNetVar("wounds", owner.organism.wounds)

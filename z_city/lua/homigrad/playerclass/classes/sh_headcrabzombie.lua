@@ -271,7 +271,6 @@ function CLASS.Think(self)
 		org.needotrub = false
 	end
 
-	org.jawdislocation = false
 	org.llegdislocation = false
 	org.rlegdislocation = false
 	org.rarmdislocation = false

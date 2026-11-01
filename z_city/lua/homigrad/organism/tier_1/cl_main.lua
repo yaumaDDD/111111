@@ -242,37 +242,6 @@ hook.Add("radialOptions", "DislocatedJoint2", function()
     end
 end)
 
-hook.Add("radialOptions", "DislocatedJaw", function()
-    if !lply:Alive() or !lply.organism or lply.organism.otrub then return end
-	if (lply.tried_fixing_limb or 0) > CurTime() then return end
-	local org = lply.organism
-	if org.pain > 60 then return end
-	
-    if org.jawdislocation then
-        local tbl = {
-            function()
-				lply.tried_fixing_limb = CurTime() + 0.5
-				RunConsoleCommand("hg_fixdislocation", 3, 0)
-            end,
-            "Fix dislocation (jaw)"
-        }
-        hg.radialOptions[#hg.radialOptions + 1] = tbl
-	else
-		local ent = hg.eyeTrace(lply).Entity
-
-		if ent.organism and ent.organism.jawdislocation then
-			local tbl = {
-				function()
-					lply.tried_fixing_limb = CurTime() + 0.5
-					RunConsoleCommand("hg_fixdislocation", 3, 1)
-				end,
-				"Fix "..ent:GetPlayerName().."'s dislocation (jaw)"
-			}
-			hg.radialOptions[#hg.radialOptions + 1] = tbl
-		end
-    end
-end)
-
 hook.Add("PostRender", "screenshot_think", function()
 	local org = lply.organism
 	

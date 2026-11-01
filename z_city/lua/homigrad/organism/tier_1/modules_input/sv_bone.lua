@@ -228,68 +228,7 @@ local function spine(org, bone, dmg, dmgInfo, number, boneindex, dir, hit, ricoc
 	return result,vecrand
 end
 
-local jaw_broken_msg = {
-	"I FEEL PIECES OF MY JAW... FUCK-FUCK-FUCK",
-	"MY JAW IS FUCKING FLOATING IN MY HEAD",
-	"MY JAW... OHH IT HURTS REALLY BAD... I FEEL PIECES OF IT MOVING",
-}
-
-local jaw_dislocated_msg = {
-	"I CAN'T CLOSE MY JAW... IT FUCKING HURTS",
-	"MY JAW... ITS JUST STUCK THERE-- OH ITS PAINING",
-	"I CANT MOVE MY JAW AT ALL... AND ITS REALLY ACHING",
-	//"I CANT EVEN SPEAK, I NEED TO PUNCH IT BACK IN PLACE... BUT IT HURTS REAL BAD",
-}
-
 local input_list = hg.organism.input_list
-input_list.jaw = function(org, bone, dmg, dmgInfo, boneindex, dir, hit, ricochet)
-	local oldDmg = org.jaw
-
-	local result, vecrand = damageBone(org, 0.25, dmg, dmgInfo, "jaw", boneindex, dir, hit, ricochet)
-
-	hg.AddHarmToAttacker(dmgInfo, (org.jaw - oldDmg) * 3, "Jaw bone damage harm")
-
-	if org.jaw == 1 and (org.jaw - oldDmg) > 0 and org.isPly then org.owner:Notify(jaw_broken_msg[math.random(#jaw_broken_msg)], true, "jaw", 2) end
-
-	local dislocated = (org.jaw - oldDmg) > math.Rand(0.1, 0.3)
-
-	if org.jaw == 1 then
-		org.shock = org.shock + dmg * 40
-		org.avgpain = org.avgpain + dmg * 30
-
-		if oldDmg != 1 then org.owner:EmitSound("bones/bone"..math.random(8)..".mp3", 75, 100, 1, CHAN_AUTO) end
-	end
-
-	org.shock = org.shock + dmg * 3
-
-	if dislocated then
-		org.shock = org.shock + dmg * 20
-		org.avgpain = org.avgpain + dmg * 20
-		
-		if !org.jawdislocation then
-			org.owner:EmitSound("bones/bone"..math.random(8)..".mp3", 75, 100, 1, CHAN_AUTO)
-		end
-
-		org.jawdislocation = true
-
-		if org.isPly then org.owner:Notify(jaw_dislocated_msg[math.random(#jaw_dislocated_msg)], true, "jaw", 2) end
-	end
-
-	if dmg > 0.2 then
-		if org.isPly then timer.Simple(0, function() hg.LightStunPlayer(org.owner,1 + dmg) end) end
-	end
-
-	return result, vecrand
-end
-
-hook.Add("CanListenOthers", "CantHaveShitInDetroit", function(output, input, isChat, teamonly, text)
-	if IsValid(output) and (output.organism.jaw == 1 or output.organism.jawdislocation) and output:Alive() and (output:IsSpeaking() or isChat) then
-		-- and !isChat and output:IsSpeaking()
-		output.organism.painadd = output.organism.painadd + 2 * (output:IsSpeaking() and 1 or (isChat and 5 or 0))
-		output:Notify("My jaw is really hurting when I speak.", 60, "painfromjawspeak", 0, nil, Color(255, 210, 210))
-	end
-end)
-
 input_list.skull = function(org, bone, dmg, dmgInfo, boneindex, dir, hit, ricochet)
 	local oldDmg = org.skull
 	

@@ -2169,7 +2169,7 @@ local function ProcessImpactDamage(ply, limb, force)
     -- dislocation check
     local structuralMultiplier = math.Clamp(((state.muscle or 100) * 0.01) + 0.5, 0, 1)
     local dislocateThreshold = math.Rand(jumpSpeed * 3.5, jumpSpeed * 5.0) * structuralMultiplier
-    if force > dislocateThreshold then
+    if force > dislocateThreshold and limb ~= "head" then -- (no jaw dislocation)
         ApplyDislocation(ply, limb, state)
         state.pain = math.Clamp(state.pain + math.Rand(40, 80), 0, 100)
         body.adrenaline = math.Clamp((body.adrenaline or 0) + 75, 0, 100)

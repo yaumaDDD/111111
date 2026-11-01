@@ -365,7 +365,7 @@ for key, value in pairs({
     rippedeye = "Half-blind",
     rippedeyedsc = "One eye is gone, narrowing your field of view and leaving a mental scar.",
     rippedjaw = "Disfigured",
-    rippedjawdsc = "Severe head trauma tore away the lower jaw. Eating and speaking are much harder.",
+    rippedjawdsc = "Severe head trauma has badly disfigured the face.",
 
     braindamage1 = "Cognitive impairment",
     braindamage1dsc = "Brain damage is making thought feel strange and confused.",

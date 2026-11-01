@@ -17,7 +17,6 @@ hook.Add("Org Clear", "Main", function(org)
 	org.brain = 0
 	org.consciousness = 1
 	org.disorientation = 0
-	org.jaw = 0
 	org.spine1 = 0
 	org.spine2 = 0
 	org.spine3 = 0
@@ -37,7 +36,6 @@ hook.Add("Org Clear", "Main", function(org)
 	org.rlegdislocation = false
 	org.rarmdislocation = false
 	org.larmdislocation = false
-	org.jawdislocation = false
 
 	org.llegamputated = false
 	org.rlegamputated = false
@@ -156,7 +154,6 @@ local function send_organism(org, ply)
 	sendtable.rlegdislocation = org.rlegdislocation
 	sendtable.rarmdislocation = org.rarmdislocation
 	sendtable.larmdislocation = org.larmdislocation
-	sendtable.jawdislocation = org.jawdislocation
 	sendtable.llegamputated = org.llegamputated
 	sendtable.rlegamputated = org.rlegamputated
 	sendtable.rarmamputated = org.rarmamputated
@@ -218,7 +215,6 @@ local function send_bareinfo(org)
 	sendtable.rlegdislocation = org.rlegdislocation
 	sendtable.rarmdislocation = org.rarmdislocation
 	sendtable.larmdislocation = org.larmdislocation
-	sendtable.jawdislocation = org.jawdislocation
 	sendtable.llegamputated = org.llegamputated
 	sendtable.rlegamputated = org.rlegamputated
 	sendtable.rarmamputated = org.rarmamputated
@@ -854,10 +850,6 @@ concommand.Add("hg_fixdislocation", function(ply, cmd, args)
 			fixlimb(org, "larm", fixer)
 		elseif org.rarmdislocation then
 			fixlimb(org, "rarm", fixer)
-		end
-	elseif math.Round(tonumber(args[1])) == 3 then
-		if org.jawdislocation then
-			fixlimb(org, "jaw", fixer)
 		end
 	end
 end)

@@ -676,11 +676,7 @@ local function RegisterDefaults()
         icon = "dislocatedjaw",
         chippedOnly = true,
         condition = function(ctx)
-            local head = Head(ctx)
             local thorax = Thorax(ctx)
-            if head.dislocated then
-                return Mood(math.Clamp(Round(Number(head.dislocationTimer, 0) * 0.03), 0, 3), "Dislocated jaw", "The jaw is dislocated.")
-            end
             if thorax.dislocated then
                 return Mood(math.Clamp(Round(Number(thorax.dislocationTimer, 0) * 0.03), 0, 3), "Dislocated spine", "The spine is dislocated.", false, {icon = "dislocatedspine"})
             end
@@ -965,7 +961,7 @@ local function RegisterDefaults()
             local head = Head(ctx)
             local eyes = Number(head.eyes, 2)
             if ctx.c.disfigured then
-                return Mood(3, "Disfigured", "The jaw is badly damaged.")
+                return Mood(3, "Disfigured", "The face is badly damaged.")
             end
             if ctx.c.bothEyesGone or eyes <= 0 then
                 return Mood(3, "Eyes gone", "Both eyes are missing.", false, {icon = "rippedeye"})

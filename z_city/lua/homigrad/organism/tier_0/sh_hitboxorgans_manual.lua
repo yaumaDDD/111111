@@ -24,7 +24,7 @@ male["ValveBiped.Bip01_Head1"] = {
 		Color(0, 255, 0)
 	},
 	{
-		"jaw", --jaw
+		"skull", --(jaw hitbox: no jaw anymore, counts as skull)
 		0.5,
 		Vector(1, -3, 0),
 		Angle(0, 0, 0),
@@ -277,7 +277,7 @@ female["ValveBiped.Bip01_Head1"] = {
 		Color(0, 255, 0)
 	},
 	{
-		"jaw", --jaw
+		"skull", --(jaw hitbox: no jaw anymore, counts as skull)
 		0.05,
 		Vector(0, -1.5, 0),
 		Angle(0, 0, 0),
@@ -368,7 +368,6 @@ hg.organism.translationTbl = {
 	["helmet2"] = "Helmet",
 	["helmet1"] = "Helmet",
 	["skull"] = "Skull",
-	["jaw"] = "Jaw",
 	["brain"] = "Brain",
 	["arteria"] = "Carotid artery",
 	["larmdown"] = "Left forearm",

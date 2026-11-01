@@ -31,16 +31,12 @@ local hg_infstamina = CreateConVar("hg_infstamina", "0", FCVAR_ARCHIVE + FCVAR_N
 module[2] = function(owner, org, timeValue)
 	local stamina = org.stamina
 	
-	local painfrommoving = (stamina.sub * (org.chest))//(stamina.sub * ((org.jaw == 1 and 1 or 0) + org.chest + (org.jawdislocation and 1 or 0)))
+	local painfrommoving = (stamina.sub * (org.chest))
 	//org.painadd = org.painadd + painfrommoving * timeValue * 5
 
 	if painfrommoving > 0 then
 		//org.owner:Notify("I should stop moving so much...", 30, "painfrommoving", 0, nil, Color(255, 0, 0))
 	
-		if (org.jaw == 1) or org.jawdislocation then
-			//org.owner:Notify("My jaw is really hurting every move I make.", 60, "painfromjaw", 0, nil, Color(255, 210, 210))
-		end
-
 		if (org.chest > 0.25) then
 			//org.owner:Notify("Breathing is painful. Something is wrong with my ribs.", 60, "painfromribs", 0, nil, Color(255, 210, 210))
 		end

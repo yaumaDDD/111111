@@ -32,7 +32,6 @@ hook.Add("Org Think", "regenerationfurry", function(owner, org, timeValue)
 	org.rlegdislocation = false
 	org.rarmdislocation = false
 	org.larmdislocation = false
-	org.jawdislocation = false
 
 	org.liver = math.max(org.liver - regen, 0)
 	org.intestines = math.max(org.intestines - regen, 0)
