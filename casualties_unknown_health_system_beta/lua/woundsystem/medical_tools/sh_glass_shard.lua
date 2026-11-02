@@ -1,6 +1,37 @@
 WoundSystem = WoundSystem or {}
 
+-- RU: legacy GLASS_SHARD kept for saves, but active shards use SHRAPNEL (state.shrapnel / SHRAPNEL status)
 if WoundSystem.Statuses then
+    -- native shrapnel for glass: infection persists, bandage allowed but shrapnelClotMult 0 / canSkinHeal false handled in sv_health
+    WoundSystem.Statuses.Register("SHRAPNEL", {
+        title = "Shrapnel",
+        desc = "Embedded glass/metal fragment. Must be pulled by hands via Examine Body. Bandage slows but does not stop bleed; infection persists.",
+        icon = "casunknown-images/icons/bleeding.png",
+        type = "number",
+        order = 28,
+        color = {180, 220, 255},
+        tick = function(ctx, value, dt)
+            if not ctx or not ctx.limb then return value end
+            local limb = ctx.limb
+            local body = ctx.body
+            -- shrapnel bleed trickle - close to Z-City coagulate/bleed rhythm but visible
+            limb.bleed = math.Clamp((limb.bleed or 0) + 0.04 * (dt or 0) * math.max(0.6, (value or 1)), 0, 100)
+            local opiate = (body and body.opiateAmount or 0) + (body and body.analgesia or 0) * 0.5
+            if ctx.ply and IsValid(ctx.ply) and ctx.ply.organism then
+                opiate = opiate + (ctx.ply.organism.painkiller or 0) * 0.5 + (ctx.ply.organism.analgesia or 0) * 0.5
+            end
+            if opiate < 1.5 then
+                limb.pain = math.max(limb.pain or 0, 30)
+                if (limb.pain or 0) < 36 then limb.pain = math.Clamp((limb.pain or 0) + 0.10 * (dt or 0), 0, 100) end
+            end
+            -- shrapnel drives infection: seed infectionSpeed if skin broken
+            if (limb.skin or 100) < 85 and (limb.infectionSpeed or 0) <= 0 then
+                if math.random() < 0.004 * (dt or 0) * 60 then limb.infectionSpeed = math.max(limb.infectionSpeed or 0, 0.9) end
+            end
+            return value
+        end,
+        onExpire = function(ctx) end
+    })
     WoundSystem.Statuses.Register("GLASS_SHARD", {
         title = "Glass Shard",
         desc = "A glass shard is embedded in the limb. Extraction requires tweezers. Pain persists until removed.",

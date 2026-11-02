@@ -169,8 +169,34 @@ end
 -----------------------------------------------------------------------------------------------------------------------
 -- COLLISIONS, FALLS  (Z-City filters/structure, the damage itself is the C:U impact model)
 -----------------------------------------------------------------------------------------------------------------------
--- glass surfaces should embed shards even on light bump per RU
+-- glass surfaces should embed shards even on light bump per RU - use WoundSystem shrapnel for glass
 local glassCutSurfaces = {glass=true, glassbottle=true, glassfloor=true, brokenglass=true, glass_breakable=true}
+-- helper: add shrapnel for glass (WoundSystem native shrapnel, reaction only on glass - incl. ragdoll)
+function WB.AddShrapnelForGlass(ply, limbId, count)
+    if not WB.IsBridged(ply) then return false end
+    local H = Health()
+    local limbs = WB.GetLimbs(ply)
+    local st = limbs and limbs[limbId]
+    if not st or st.dismembered then return false end
+    count = math.Clamp(tonumber(count) or 1, 1, 5)
+    local maxShrap = (H.Constants and H.Constants.ShrapnelPieceCount) or 5
+    st.shrapnel = math.Clamp((tonumber(st.shrapnel) or 0) + count, 0, maxShrap)
+    -- sync to client via customStatuses SHRAPNEL (and keep field for native logic)
+    if WoundSystem.Statuses and WoundSystem.Statuses.Set then
+        WoundSystem.Statuses.Set(st, "SHRAPNEL", st.shrapnel)
+        -- remove legacy glass status if present to avoid duplicates
+        if st.customStatuses and st.customStatuses["GLASS_SHARD"] then WoundSystem.Statuses.Clear(st, "GLASS_SHARD") end
+    end
+    -- glass cut also causes bleed/skin damage like Z-City wound (Fn.AddGunshotShrapnel pattern)
+    st.bleed = math.Clamp((st.bleed or 0) + 9, 0, 100)
+    st.pain = math.Clamp((st.pain or 0) + 14, 0, 100)
+    st.skin = math.Clamp((st.skin or 100) - 7, 0, 100)
+    if H.Fn and H.Fn.ClearLimbBandage then H.Fn.ClearLimbBandage(st) end
+    if H.SendLimbUpdate then H.SendLimbUpdate(ply, limbId, true) end
+    if H.SendCardioUpdate then H.SendCardioUpdate(ply, true) end
+    return true
+end
+
 --- Rough surfaces / glass cut the limb that hit them (Z-City: `bleedSurfaces`, 50%)
 function WB.SurfaceCut(ply, limbId, force, surface)
 	local H = Health()
@@ -180,19 +206,19 @@ function WB.SurfaceCut(ply, limbId, force, surface)
 	if not l or l.dismembered then return false end
 
 	local jump = (body and body.jumpSpeed) or 6.5
-	-- RU: glass shards on any glass contact even light bump: embed shard even at low force
+	-- RU: glass shards on any glass contact even light bump: embed shrapnel even at low force (reaction only on glass, even in ragdoll)
 	if surface and glassCutSurfaces[surface] then
 		if force > jump * 0.35 then
-			WB.GlassShard(ply, limbId, 1)
+			WB.AddShrapnelForGlass(ply, limbId, 1)
 			l.skin = math.Clamp((l.skin or 100) - math.max(force * 0.6, 6), 0, 100)
 			l.bleed = math.Clamp((l.bleed or 0) + math.max(force * 0.15, 4), 0, 100)
 			if H.Fn and H.Fn.ClearLimbBandage then H.Fn.ClearLimbBandage(l) end
 			if H.SendLimbUpdate then H.SendLimbUpdate(ply, limbId, true) end
 			return true
 		end
-		-- even very light bump still embeds
+		-- even very light bump still embeds shrapnel
 		if force > jump * 0.12 then
-			WB.GlassShard(ply, limbId, 1)
+			WB.AddShrapnelForGlass(ply, limbId, 1)
 			if H.SendLimbUpdate then H.SendLimbUpdate(ply, limbId, true) end
 			return true
 		end
@@ -283,11 +309,8 @@ function WB.AddWoundManual(ent, dmgBlood, bone)
 	if isnumber(bone) then bonename = ent:GetBoneName(bone) end
 
 	local limbId = H.RagdollBoneNameToLimb and H.RagdollBoneNameToLimb(bonename) or "hand_R"
-	-- RU: glass persists until extracted, bind to Z-City standard damage
-	if H.AddGlassShard then
-		H.AddGlassShard(ply, limbId, 1, true)
-		return true
-	end
+	-- RU: glass shards as native shrapnel (state.shrapnel) — infection persists, bandage allowed but slow death
+	if WB.AddShrapnelForGlass(ply, limbId, 1) then return true end
 	local limb = limbs[limbId or "thorax"]
 	if limb and not limb.dismembered then
 		limb.bleed = math.Clamp((limb.bleed or 0) + (tonumber(dmgBlood) or 0) * 0.04, 0, 100)
@@ -297,17 +320,9 @@ function WB.AddWoundManual(ent, dmgBlood, bone)
 	return true
 end
 
--- RU: helper for glass shard embedding from Z-City (called via sv_util GlassShards / weapon_hands_sh)
+-- RU: helper for glass shard embedding from Z-City (called via sv_util GlassShards / weapon_hands_sh) — native shrapnel, reaction only on glass
 function WB.GlassShard(ply, limbId, count)
-	if not WB.IsBridged(ply) then return false end
-	local H = Health()
-	if H and H.AddGlassShard then
-		return H.AddGlassShard(ply, limbId, count or 1, true)
-	end
-	if WoundSystem and WoundSystem.GlassShard and WoundSystem.GlassShard.AddShard then
-		return WoundSystem.GlassShard.AddShard(ply, limbId, count or 1)
-	end
-	return false
+	return WB.AddShrapnelForGlass(ply, limbId, count or 1)
 end
 
 --- Z-City AmputateLimb for a living player -> WoundSystem dismemberment

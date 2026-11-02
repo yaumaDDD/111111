@@ -244,9 +244,10 @@ function Config.ApplyVanillaBloodMode(ent)
     end
 end
 
+-- RU: приблизить к Z-City: регенерация крови медленнее, кровотечение быстрее (org.blood 5000 vs 100 C:U)
 function Config.BloodRegenSpeed(body)
     local healingMult = Config.CvFloat(CVars.HealingRate, 1)
-    return 0.035 * math.max((body.hunger or 0) * 0.01, 0) * healingMult
+    return 0.018 * math.max((body.hunger or 0) * 0.01, 0) * healingMult
 end
 
 function Config.ViscosityRemap01(viscosity)
@@ -261,7 +262,8 @@ end
 function Config.ComputeBleedingSpeedMultiplier(body)
     local vis = body.bloodViscosity or 0
     local remapped = ((vis + 100) / 100) * (-0.01) + 0.01
-    return (0.01 + math.Clamp(remapped, 0, 1)) * Config.CvFloat(CVars.BleedRate, 1)
+    -- Z-City ~3.8x faster bleed: org.blood 5000 scale vs C:U 100, pulse/coagulate curve
+    return (0.038 + math.Clamp(remapped, 0, 1) * 0.012) * Config.CvFloat(CVars.BleedRate, 1)
 end
 
 function Config.ComputeHungerLimbHeal(body)

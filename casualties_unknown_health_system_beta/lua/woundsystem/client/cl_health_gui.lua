@@ -3751,12 +3751,21 @@ local function HasBandageInHandsHUD()
     return c == "weapon_bandage_sh" or c == "weapon_bigbandage_sh" or c == "weapon_medkit_sh" or c == "weapon_gauze" or string.find(c, "bandage")
 end
 
+-- RU: glass shards now use native shrapnel (state.shrapnel 0-5), not GLASS_SHARD custom status
+local function HasShrapnel(state)
+    if not state then return false end
+    if (tonumber(state.shrapnel) or 0) > 0 then return true end
+    if state.customStatuses and state.customStatuses["SHRAPNEL"] and tonumber(state.customStatuses["SHRAPNEL"]) > 0 then return true end
+    -- backward compat: still honor legacy GLASS_SHARD if present (old saves)
+    if state.customStatuses and state.customStatuses["GLASS_SHARD"] and tonumber(state.customStatuses["GLASS_SHARD"]) > 0 then return true end
+    if (state.glassShards or 0) > 0 then return true end
+    return false
+end
+
 function WoundSystemDrawLimbActionPoint(limbId, state, pointPos, bX, bY, scale, dollScale, mx, my, isClicking, lastMouseState, minigameActive)
     local actionStatus = nil
 
-    if state.customStatuses and state.customStatuses["GLASS_SHARD"] and tonumber(state.customStatuses["GLASS_SHARD"]) > 0 then
-        actionStatus = "GLASS_SHARD"
-    elseif (state.glassShards or 0) > 0 then
+    if HasShrapnel(state) then
         actionStatus = "GLASS_SHARD"
     elseif state.customStatuses and state.customStatuses["TOURNIQUET"] then
         actionStatus = "TOURNIQUET"
@@ -3765,24 +3774,17 @@ function WoundSystemDrawLimbActionPoint(limbId, state, pointPos, bX, bY, scale, 
     elseif state.dislocated then
         actionStatus = "DISLOCATION"
     else
-        -- BANDAGE via HUD when holding bandage in hands, bleeding and no glass
+        -- BANDAGE via HUD when holding bandage in hands: allowed even with shrapnel but infection persists (shrapnelClotMult 0, canSkinHeal false)
         if state and not state.dismembered and not state.isBandaged and (state.bleed or 0) > 0.08 then
             if HasBandageInHandsHUD() then
-                -- also ensure no glass blocks
-                local hasGlass = (state.customStatuses and state.customStatuses["GLASS_SHARD"] and tonumber(state.customStatuses["GLASS_SHARD"]) > 0) or (state.glassShards or 0) > 0
-                if not hasGlass then
-                    actionStatus = "BANDAGE"
-                end
+                actionStatus = "BANDAGE"
             end
         end
     end
 
     if not actionStatus then return end
     if actionStatus == "DISLOCATION" and not state.dislocated then return end
-    if actionStatus == "GLASS_SHARD" and not (state.customStatuses and state.customStatuses["GLASS_SHARD"] or state.glassShards) then
-        -- fallback check via WoundSystemClientState handled above, but keep
-        if not ((state.customStatuses and tonumber(state.customStatuses["GLASS_SHARD"] or 0) > 0) or (state.glassShards or 0) > 0) then return end
-    end
+    if actionStatus == "GLASS_SHARD" and not HasShrapnel(state) then return end
 
     local pointCfg = WoundSystemLimbUIConfig.ActionPoint or {}
     local actionCfg = (pointCfg.Actions and pointCfg.Actions[actionStatus]) or {}

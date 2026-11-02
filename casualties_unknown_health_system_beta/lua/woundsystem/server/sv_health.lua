@@ -3867,6 +3867,7 @@ local defaultLimbState = {
     skinHealAmount = 0,
     furBloodAmount = 0,
     eyes = 2,
+    shrapnel = 0,
     dismembered = false,
     bandageMinigameSpeedMult = 1.0,
     customStatuses = {}
@@ -6347,10 +6348,11 @@ local function LimbPhysiologyTick(dt)
                 state.pain = math.max(0, state.pain - (5 * dt))
             end
 
-            -- Bleed clotting + bandage slow (C# Limb.Update)
+            -- Bleed clotting + bandage slow (C# Limb.Update) - RU: shrapnelClotMult 0 => bandage does not stop bleed while shrapnel present
             local bandageClotTerm = 0
             if (state.bandageSlowAmount or 0) > 0 then
-                bandageClotTerm = 1.25 * dt
+                local hasShrap = (tonumber(state.shrapnel) or 0) > 0 or (state.customStatuses and state.customStatuses["SHRAPNEL"] and tonumber(state.customStatuses["SHRAPNEL"]) > 0)
+                bandageClotTerm = hasShrap and 0 or (1.25 * dt)
             end
 
             local bleedReduction = dt * body.bleedClottingSpeed * healingMult + bandageClotTerm
@@ -6373,8 +6375,9 @@ local function LimbPhysiologyTick(dt)
                 body.internalBleeding = (body.internalBleeding or 0) + bodyEffects.internalBleeding
             end
 
-            -- Skin heal (C# SkinHealRate)
-            local canSkinHeal = not Fn.LimbIsInfected(state) and (body.hunger or 100) > 0
+            -- Skin heal (C# SkinHealRate) - RU: canSkinHeal false while shrapnel present => infection persists even bandaged
+            local hasShrapForHeal = (tonumber(state.shrapnel) or 0) > 0 or (state.customStatuses and state.customStatuses["SHRAPNEL"] and tonumber(state.customStatuses["SHRAPNEL"]) > 0)
+            local canSkinHeal = not Fn.LimbIsInfected(state) and (body.hunger or 100) > 0 and not hasShrapForHeal
             if canSkinHeal then
                 local skinRate = 0.055 * sleepingMult
                     * (((state.skin or 100) > 10) and 1 or 0.25)
@@ -8013,22 +8016,8 @@ function WoundSystem.Health.ApplyItemToBody(target, itemId, limbId, amount, opts
     if not PlayerLimbs[target] then InitPlayer(target) end
     if not GetLimbState(target, limbId) then return false end
 
-    -- RU: logical prerequisite: must remove glass shards before bandage can succeed
-    do
-        local bandageIds = {GAUZE=true, STERILIZEDBANDAGE=true, PLASTICBANDAGE=true, ANALGESICGAUZE=true, ADHESIVEBANDAGE=true, RAG=true, RIPPEDDRESSING=true}
-        if bandageIds[itemId] then
-            local st = PlayerLimbs[target] and PlayerLimbs[target][limbId]
-            if st and st.customStatuses and st.customStatuses["GLASS_SHARD"] and tonumber(st.customStatuses["GLASS_SHARD"]) > 0 then
-                if IsValid(target) and target.Notify then target:Notify("Remove glass shard from "..(limbId or "?").." before bandaging!", 1, "glass_block_bandage", 1, nil, Color(255,170,120,255)) end
-                return false
-            end
-            -- also check legacy glassShards field
-            if st and (st.glassShards or 0) > 0 then
-                if IsValid(target) and target.Notify then target:Notify("Remove glass obstruction from "..limbId.." first!", 1, "glass_block2", 1, nil, Color(255,170,120,255)) end
-                return false
-            end
-        end
-    end
+    -- RU: bandage allowed even with shrapnel (state.shrapnel) but infection persists: native shrapnelClotMult 0 and canSkinHeal false
+    -- previous GLASS_SHARD block removed - bandage no longer gated by glass/shard
 
     local use = item.use or {}
     if WoundSystem.Items.LimbAllowed and not WoundSystem.Items.LimbAllowed(use, limbId) then return false end
