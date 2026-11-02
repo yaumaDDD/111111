@@ -328,8 +328,81 @@ function ENT:Explode()
 	Poof:SetScale(1.2)
 	util.Effect("eff_jack_hmcd_shrapnel",Poof,true,true)
 
-	-- SHRAPNEL REMOVED: blast only (RU)
-		timer.Simple(0.05, function() if IsValid(self) and self.ExplodeAdd then self:ExplodeAdd() end end)
+	timer.Simple(0, function()
+		util.ScreenShake( selfPos, 35, 200, 1, 1000 )
+
+		local ammo = "Metal Debris"
+		local ammotype = hg.ammotypeshuy[ammo].BulletSettings
+
+		local co = coroutine.create(function()
+
+			local LastShrapnel = SysTime()
+
+			for i = 1, self.Fragmentation do
+					LastShrapnel = SysTime()
+
+					local dir = VectorRand(-1,1):GetNormalized()--vector_up
+					dir[3] = dir[3] > 0 and math.abs(dir[3] - 0.5) or -math.abs(dir[3] + 0.5)
+					dir:Normalize()
+
+					local Tr = util.QuickTrace(selfPos, dir * 10000, self)
+
+					if Tr.Hit and !Tr.HitSky and !Tr.HitWorld then
+						local bullet = {}
+
+						bullet.Speed = ammotype.Speed
+						bullet.Distance = ammotype.Distance or 56756
+						bullet.penetrated = 0
+						bullet.MaxPenLen = 100
+						bullet.Penetration = (ammotype.Penetration or (-(-self.Penetration))) * (self.PenetrationMultiplier or 1)
+						bullet.Diameter = ammotype.Diameter or 1
+
+						bullet.Src = selfPos
+						bullet.Spread = vecCone
+						bullet.Force = 20
+						bullet.Damage = 40
+						bullet.AmmoType = ammo
+						bullet.Attacker = self.owner
+						bullet.Inflictor = self
+						bullet.Distance = 56756
+						bullet.DisableLagComp = true
+						bullet.Filter = {self}
+						bullet.Dir = dir
+						bullet.Callback = hg.bulletHit
+
+						self:FireLuaBullets(bullet, true)
+					end
+
+					LastShrapnel = SysTime() - LastShrapnel
+
+					if LastShrapnel > 0.001 then
+						coroutine.yield()
+					end
+			end
+
+			self.ShrapnelDone = true
+		end)
+
+		coroutine.resume(co)
+
+		local index = self:EntIndex()
+
+		timer.Create("GrenadeCheck_" .. index, 0, 0, function()
+			if !IsValid(self) then
+				timer.Remove("GrenadeCheck_" .. index)
+			end
+
+			coroutine.resume(co)
+
+			if self.ShrapnelDone then
+				SafeRemoveEntity(self)
+				timer.Remove("GrenadeCheck_" .. index)
+			end
+		end)
+		if self.ExplodeAdd then
+			self:ExplodeAdd()
+		end
+	end)
 	util.ScreenShake( selfPos, 35, 1, 1, 1000, true )
 	hg.EmitAISound(self:GetPos(), 300, 3, bit.bor(1, 33554432)) -- надеюсь буде работать
 end

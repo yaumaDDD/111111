@@ -100,9 +100,52 @@ local ExpTypes = {
 			EmitSound(DebrisSounds[math.random(#DebrisSounds)], Ent:GetPos(), Ent:EntIndex(), CHAN_AUTO, 1, 80)
 		end
 
-		-- SHRAPNEL REMOVED: keep blast/phase, no Metal Debris bullets
-		util.ScreenShake(SelfPos,100,900,1,5000)
-		timer.Simple(0.1, function() if IsValid(Ent) then SafeRemoveEntity(Ent) end end)
+		local bullet = {}
+		bullet.Src = SelfPos
+		bullet.Spread = vecCone
+		bullet.Force = 0.01
+		bullet.Damage = Force
+		bullet.AmmoType = "Metal Debris"
+		bullet.Attacker = Owner
+		bullet.Distance = 15000
+		bullet.DisableLagComp = true
+		bullet.Filter = {Ent}
+		table.Add(bullet.Filter, hg.drums2)
+		local multi = math.min(Mass/5,20)
+
+		co = coroutine.create(function()
+			local LastShrapnel = SysTime()
+			for i = 1, multi*3 do
+				LastShrapnel = SysTime()
+				if not IsValid(Ent) then return end
+				bullet.Dir = Ent:GetAngles():Forward() * math.random(-1,1)
+				bullet.Spread = vecCone * (i / Mass/5)
+				Ent:FireLuaBullets(bullet, true)
+				LastShrapnel = SysTime() - LastShrapnel
+				if LastShrapnel > 0.001 then
+					coroutine.yield()
+				end
+			end
+			Ent.ShrapnelDone = true
+		end)
+
+        util.ScreenShake(SelfPos,100,900,1,5000)
+
+        coroutine.resume(co)
+
+		local index = Ent:EntIndex()
+
+		timer.Create("GrenadeCheck_" .. index, 0, 0, function()
+			if !IsValid(Ent) then
+				timer.Remove("GrenadeCheck_" .. index)
+			end
+			coroutine.resume(co)
+			if Ent.ShrapnelDone then
+				if not IsValid(Ent) then return end
+				SafeRemoveEntity(Ent)
+				timer.Remove("GrenadeCheck_" .. index)
+			end
+		end)
     end,
 
     Sharpnel = function(Ent,Force,Mass)
@@ -165,9 +208,52 @@ local ExpTypes = {
 			EmitSound(DebrisSounds[math.random(#DebrisSounds)], Ent:GetPos(), Ent:EntIndex(), CHAN_AUTO, 1, 80)
 		end
 
-		-- SHRAPNEL REMOVED: keep blast/phase, no Metal Debris bullets
-		util.ScreenShake(SelfPos,100,900,1,5000)
-		timer.Simple(0.1, function() if IsValid(Ent) then SafeRemoveEntity(Ent) end end)
+		local bullet = {}
+		bullet.Src = SelfPos
+		bullet.Spread = vecCone
+		bullet.Force = 0.01
+		bullet.Damage = Force
+		bullet.AmmoType = "Metal Debris"
+		bullet.Attacker = Owner
+		bullet.Distance = 15000
+		bullet.DisableLagComp = true
+		bullet.Filter = {Ent}
+		table.Add(bullet.Filter, hg.drums2)
+		local multi = math.min(Mass/5,20)
+
+		co = coroutine.create(function()
+			local LastShrapnel = SysTime()
+			for i = 1, multi*5 do
+				LastShrapnel = SysTime()
+				if not IsValid(Ent) then return end
+				bullet.Dir = Ent:GetAngles():Forward() * math.random(-1,1)
+				bullet.Spread = vecCone * (i / Mass/5)
+				Ent:FireLuaBullets(bullet, true)
+				LastShrapnel = SysTime() - LastShrapnel
+				if LastShrapnel > 0.001 then
+					coroutine.yield()
+				end
+			end
+			Ent.ShrapnelDone = true
+		end)
+
+         util.ScreenShake(SelfPos,100,900,1,5000)
+
+        coroutine.resume(co)
+
+		local index = Ent:EntIndex()
+
+		timer.Create("GrenadeCheck_" .. index, 0, 0, function()
+			if !IsValid(Ent) then
+				timer.Remove("GrenadeCheck_" .. index)
+			end
+			coroutine.resume(co)
+			if Ent.ShrapnelDone then
+				if not IsValid(Ent) then return end
+				SafeRemoveEntity(Ent)
+				timer.Remove("GrenadeCheck_" .. index)
+			end
+		end)
     end,
     Normal = function(Ent,Force)
 		local rad = (Force / 8)

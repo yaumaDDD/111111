@@ -255,7 +255,7 @@ local function onstopped_explosive(self, last_unsure_penetration_pos, reason, tr
 			local attacker = self.Shooter
 			local pos = self.Pos - self.Vel:GetNormalized() * 2
 			local vec_cone = Vector(0, 0, 0)
-			-- shrapnel removed
+			local shrapnel_coroutine_id = #APScheduledExplosions + 1
 			
 			util.ScreenShake(self.Pos, 35, 1, 1, 3000)
 
@@ -280,7 +280,48 @@ local function onstopped_explosive(self, last_unsure_penetration_pos, reason, tr
 			--effectdata:SetScale(0.9)
 			--util.Effect("eff_jack_fragsplosion", effectdata)
 	
-			-- SHRAPNEL REMOVED: blast only, no Metal Debris (RU request)
+			timer.Simple(.15,function()
+				local coroutine_antilag = coroutine.create(function()
+					local last_shrapnel = SysTime()
+
+					for i = 1, 600 do
+						last_shrapnel = SysTime()
+						local dir = VectorRand(-1, 1)
+						
+						dir:Normalize()
+						
+						dir[3] = dir[3] > 0 and math.abs(dir[3] - 0.5) or -math.abs(dir[3] + 0.5)
+						
+						dir:Normalize()
+						
+						local bullet = {}
+						bullet.Src = pos
+						bullet.Spread = vec_cone
+						bullet.Force = 4
+						bullet.Damage = 40
+						bullet.AmmoType = "Metal Debris"
+						bullet.Attacker = game.GetWorld()
+						bullet.Inflictor = attacker
+						bullet.Distance = 567
+						bullet.DisableLagComp = true
+						bullet.Dir = dir
+						
+						game.GetWorld():FireLuaBullets(bullet, true)
+
+						last_shrapnel = SysTime() - last_shrapnel
+
+						if(last_shrapnel > 0.001)then
+							coroutine.yield()
+						end
+					end
+					
+					APScheduledExplosions[shrapnel_coroutine_id] = nil
+				end)
+
+				APScheduledExplosions[shrapnel_coroutine_id] = coroutine_antilag
+				
+				coroutine.resume(coroutine_antilag)
+			end)
 			util.ScreenShake( self.Pos, 35, 1, 1, 1000, true )
 		end
 	end

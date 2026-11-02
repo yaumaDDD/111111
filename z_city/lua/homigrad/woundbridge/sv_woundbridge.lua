@@ -192,9 +192,7 @@ end
 function WB.ImpactForce(ply, speed, dot, massK)
 	local body = WB.GetBody(ply)
 	local jump = (body and body.jumpSpeed) or 6.5
-	-- RU: расширяем диапазон восприятия урона (было /50 -> /38, +15% mult)
-	local base = math.Clamp((speed or 0) * (dot or 1) * (massK or 1) / 38, 0, jump * 7.5)
-	return base * WB.cvCollisionScale:GetFloat() * 1.15
+	return math.Clamp((speed or 0) * (dot or 1) * (massK or 1) / 50, 0, jump * 7) * WB.cvCollisionScale:GetFloat()
 end
 
 --- One impact on a limb through the C:U impact model (muscle, pain, skin, bleeding, dislocation, fracture, internal bleeding, head).
@@ -250,7 +248,7 @@ function WB.ApplyFall(ply, dmgInfo)
 	return true
 end
 
---- Z-City AddWoundManual (gibs, glass, explosion cuts): turn it into WoundSystem glass shard / bleeding
+--- Z-City AddWoundManual (gibs, glass, explosion cuts): turn it into WoundSystem bleeding
 function WB.AddWoundManual(ent, dmgBlood, bone)
 	local ply = WB.GetPlayer(ent)
 	if not WB.IsBridged(ply) then return false end
@@ -262,12 +260,7 @@ function WB.AddWoundManual(ent, dmgBlood, bone)
 	local bonename = bone
 	if isnumber(bone) then bonename = ent:GetBoneName(bone) end
 
-	local limbId = H.RagdollBoneNameToLimb and H.RagdollBoneNameToLimb(bonename) or "hand_R"
-	-- RU: glass persists until extracted, bind to Z-City standard damage
-	if H.AddGlassShard then
-		H.AddGlassShard(ply, limbId, 1, true)
-		return true
-	end
+	local limbId = H.RagdollBoneNameToLimb and H.RagdollBoneNameToLimb(bonename) or "thorax"
 	local limb = limbs[limbId or "thorax"]
 	if limb and not limb.dismembered then
 		limb.bleed = math.Clamp((limb.bleed or 0) + (tonumber(dmgBlood) or 0) * 0.04, 0, 100)
@@ -275,19 +268,6 @@ function WB.AddWoundManual(ent, dmgBlood, bone)
 	end
 
 	return true
-end
-
--- RU: helper for glass shard embedding from Z-City (called via sv_util GlassShards / weapon_hands_sh)
-function WB.GlassShard(ply, limbId, count)
-	if not WB.IsBridged(ply) then return false end
-	local H = Health()
-	if H and H.AddGlassShard then
-		return H.AddGlassShard(ply, limbId, count or 1, true)
-	end
-	if WoundSystem and WoundSystem.GlassShard and WoundSystem.GlassShard.AddShard then
-		return WoundSystem.GlassShard.AddShard(ply, limbId, count or 1)
-	end
-	return false
 end
 
 --- Z-City AmputateLimb for a living player -> WoundSystem dismemberment

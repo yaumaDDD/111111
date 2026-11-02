@@ -5880,26 +5880,12 @@ WoundSystem.Health.HandleDamage = function(ent, dmginfo)
             fallForce = fallForce * 0.5
         end
 
-        -- RU: расширяем диапазон восприятия урона + точная конечность контакта при падении
+        affectedLimbs = {"foot_L", "foot_R"}
         local jumpSpeed = (body and body.jumpSpeed) or 6.5
-        -- expanded range: trigger at 0.85*jumpSpeed already considered inside ApplyFallTrauma
-        -- contacted limb from sv_fall_trauma.lua (trace hull), fallback to foot with impact side bias
-        local contactLimb = ply._woundSystemFallContactLimb
-        if contactLimb and PlayerLimbs[ply] and PlayerLimbs[ply][contactLimb] then
-            affectedLimbs = {contactLimb}
-        else
-            -- fallback: both feet, but add shins/knees/thighs progressively for harder falls (expanded)
-            affectedLimbs = {"foot_L", "foot_R"}
-            if fallForce > jumpSpeed * 1.35 then
-                table.insert(affectedLimbs, "crus_L")
-                table.insert(affectedLimbs, "crus_R")
-            end
-            if fallForce > jumpSpeed * 2.1 then
-                table.insert(affectedLimbs, "thigh_L")
-                table.insert(affectedLimbs, "thigh_R")
-            end
+        if fallForce > jumpSpeed * 1.8 then
+            table.insert(affectedLimbs, "crus_L")
+            table.insert(affectedLimbs, "crus_R")
         end
-        -- bias: if single-contact unknown, keep all but lightly; ApplyFallTrauma will handle per-limb
 
     -- AOE Blast Damage Spread for Active Players
     elseif dmginfo:IsDamageType(DMG_BLAST) then
@@ -5953,15 +5939,9 @@ WoundSystem.Health.HandleDamage = function(ent, dmginfo)
         end
 
         if dmginfo:IsFallDamage() then
-            -- RU: падение - не раны а травма той части на которую упал; боль снимается только анальгетиком ЗСити
-            -- стек стекла: урон берём только из zcity, сохраняем структуру его урона
-            if WoundSystem.Health.ApplyFallTrauma then
-                WoundSystem.Health.ApplyFallTrauma(ply, limb, fallForce)
-            else
-                ply._nextLimbPhysicsDamage = ply._nextLimbPhysicsDamage or {}
-                ply._nextLimbPhysicsDamage[limb] = math.max(ply._nextLimbPhysicsDamage[limb] or 0, CurTime() + 0.12)
-                ProcessImpactDamage(ply, limb, fallForce)
-            end
+            ply._nextLimbPhysicsDamage = ply._nextLimbPhysicsDamage or {}
+            ply._nextLimbPhysicsDamage[limb] = math.max(ply._nextLimbPhysicsDamage[limb] or 0, CurTime() + 0.12)
+            ProcessImpactDamage(ply, limb, fallForce)
 
         elseif Fn.IsBulletImpactDamage(dmginfo) then
             -- ==========================================
