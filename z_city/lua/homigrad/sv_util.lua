@@ -1363,6 +1363,26 @@ end
 				glass.init = true
 				--Player(2):SetPos(IsValid(inf) and inf:GetPos() or dmginfo:GetAttacker():GetPos())
 				--print(ent, glass) -- bro im spawned and etc.
+				-- RU: стеклянный осколок теперь всаживается в C:U конечность - привязка к стандартному урону ЗСити
+				local attacker = dmginfo:GetAttacker()
+				if IsValid(attacker) and attacker:IsPlayer() and hg.WoundBridge and hg.WoundBridge.GlassShard then
+					-- определить руку которой били стекло: активная рука / ближайшая к стеклу
+					local limb = "hand_R"
+					-- если игрок бьёт руками (weapon_hands), то берём руку по атаке
+					if attacker:GetActiveWeapon():GetClass() == "weapon_hands_sh" then
+						-- hands weapon tracks left/right via last attack side? fallback hand_R
+						limb = attacker._lastGlassHand or "hand_R"
+					end
+					-- также пробуем по ближайшей костяшке к стеклу
+					if attacker:GetPos():Distance(glass:GetPos()) < 120 then
+						hg.WoundBridge.GlassShard(attacker, limb, 1)
+					else
+						-- если разбили на дистанции (выстрелом), осколок может попасть в любую открытую часть - торс/руки
+						local hitgroup = attacker:LastHitGroup()
+						local wbLimb = hg.WoundBridge.ResolveLimb and hg.WoundBridge.ResolveLimb(attacker, nil, hitgroup) or nil
+						hg.WoundBridge.GlassShard(attacker, wbLimb or "forearm_R", 1)
+					end
+				end
 			end
 		end
 	end)
