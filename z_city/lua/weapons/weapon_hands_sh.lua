@@ -1660,13 +1660,20 @@ function SWEP:AttackFront(special_attack, rand)
 		Ent:TakeDamageInfo(Dam)
 
 		if glass then
-			-- RU: light bump also embeds glass, not only when destroyed, and everywhere
+			-- RU: шрапнель только на стекло, в т.ч. в рагдолле и при ударе руками/ногами — в конкретную конечность которая ударила
 			owner._lastGlassHand = rand and "hand_R" or "hand_L"
 			if hg.WoundBridge and hg.WoundBridge.GlassShard then
-				local limb = rand and "hand_R" or "hand_L"
+				local fallback = rand and "hand_R" or "hand_L"
+				local limb = hg.WoundBridge.PickHitLimb and hg.WoundBridge.PickHitLimb(owner, HitPos, fallback) or fallback
 				hg.WoundBridge.GlassShard(owner, limb, 1)
+				-- second fragment only if very close hit, on neighbouring segment of same arm
 				if math.random(2)==1 then
-					local extra = ({"forearm_R","forearm_L"})[math.random(2)]
+					local extra = (limb == "hand_L" or limb == "forearm_L" or limb == "arm_L") and "forearm_L" or "forearm_R"
+					if limb == "hand_L" or limb == "hand_R" then extra = (limb == "hand_L") and "forearm_L" or "forearm_R" end
+					if hg.WoundBridge.PickHitLimb then
+						-- keep extra on same side as primary limb
+						extra = string.find(limb,"_L") and extra:gsub("_R","_L") or extra
+					end
 					hg.WoundBridge.GlassShard(owner, extra, 1)
 				end
 			else

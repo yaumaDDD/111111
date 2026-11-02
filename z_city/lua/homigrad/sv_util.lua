@@ -1366,30 +1366,39 @@ end
 				-- RU: стеклянный осколок теперь всаживается в C:U конечность - привязка к стандартному урону ЗСити
 				local attacker = dmginfo:GetAttacker()
 				if IsValid(attacker) and attacker:IsPlayer() and hg.WoundBridge and hg.WoundBridge.GlassShard then
-					-- определить руку которой били стекло: активная рука / ближайшая к стеклу
-					local limb = "hand_R"
-					-- если игрок бьёт руками (weapon_hands), то берём руку по атаке
+					local glassPos = glass:GetPos()
+					local hitPos = dmginfo:GetDamagePosition()
+					if not hitPos or hitPos == vector_origin then hitPos = glassPos end
+					-- конкретная конечность которая ударила/коснулась стекла (рука/нога в зависимости от hitPos)
+					local fallback = attacker._lastGlassHand or "hand_R"
+					local limb = hg.WoundBridge.PickHitLimb and hg.WoundBridge.PickHitLimb(attacker, hitPos, fallback) or fallback
 					if attacker:GetActiveWeapon():GetClass() == "weapon_hands_sh" then
-						-- hands weapon tracks left/right via last attack side? fallback hand_R
-						limb = attacker._lastGlassHand or "hand_R"
+						limb = hg.WoundBridge.PickHitLimb and hg.WoundBridge.PickHitLimb(attacker, hitPos, attacker._lastGlassHand or limb) or limb
 					end
-					-- также пробуем по ближайшей костяшке к стеклу
-					-- RU: shards everywhere: embed into multiple limbs, not just hand
-				if attacker:GetPos():Distance(glass:GetPos()) < 300 then
+				if attacker:GetPos():Distance(glassPos) < 300 then
 						hg.WoundBridge.GlassShard(attacker, limb, 1)
-						-- additional random shard to represent "везде" (everywhere)
+						-- second fragment on same side (forearm if hand, or thigh/crus if foot) — not random everywhere
 						if math.random(2) == 1 then
-							local extra = ({"forearm_R","forearm_L","thorax","head"})[math.random(4)]
-							hg.WoundBridge.GlassShard(attacker, extra, 1)
+							local side = string.find(limb,"_L") and "_L" or "_R"
+							local extra = limb
+							if string.find(limb,"hand") or string.find(limb,"forearm") or string.find(limb,"arm") then
+								extra = "forearm"..side
+							elseif string.find(limb,"foot") or string.find(limb,"crus") or string.find(limb,"thigh") then
+								extra = "crus"..side
+							else
+								extra = "forearm"..side
+							end
+							if extra ~= limb then hg.WoundBridge.GlassShard(attacker, extra, 1) end
 						end
 					else
-						-- distant shot: still embed, spread to 1-2 random limbs
 						local hitgroup = attacker:LastHitGroup()
 						local wbLimb = hg.WoundBridge.ResolveLimb and hg.WoundBridge.ResolveLimb(attacker, nil, hitgroup) or nil
-						hg.WoundBridge.GlassShard(attacker, wbLimb or "forearm_R", 1)
+						-- distant: prefer hitgroup limb, fallback to picked limb
+						hg.WoundBridge.GlassShard(attacker, wbLimb or limb or "forearm_R", 1)
 						if math.random(3) == 1 then
-							local extra2 = ({"hand_R","hand_L","arm_R","arm_L"})[math.random(4)]
-							hg.WoundBridge.GlassShard(attacker, extra2, 1)
+							local side = wbLimb and (string.find(wbLimb,"_L") and "_L" or "_R") or (string.find(limb,"_L") and "_L" or "_R")
+							local extra2 = "hand"..side
+							if extra2 ~= (wbLimb or limb) then hg.WoundBridge.GlassShard(attacker, extra2, 1) end
 						end
 					end
 				end

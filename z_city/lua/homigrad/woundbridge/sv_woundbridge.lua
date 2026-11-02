@@ -96,6 +96,29 @@ function WB.ResolveLimb(ply, bonename, hitgroup)
 	return limb
 end
 
+-- RU: pick limb that actually hit glass by closest bone to HitPos (hand_R/hand_L or foot_R/foot_L etc.)
+function WB.PickHitLimb(ply, hitPos, fallback)
+	if not IsValid(ply) or not hitPos then return fallback end
+	local H = Health()
+	if not H or not H.Const or not H.Const.LimbToBones then return fallback end
+	local limbs = WB.GetLimbs(ply)
+	if not limbs then return fallback end
+	local bestLimb, bestDist = fallback, math.huge
+	for limbId, bones in pairs(H.Const.LimbToBones) do
+		local st = limbs[limbId]
+		if not st or st.dismembered then continue end
+		for _, boneName in ipairs(bones) do
+			local boneIdx = ply:LookupBone(boneName)
+			if not boneIdx then continue end
+			local pos = ply:GetBonePosition(boneIdx)
+			if not pos then continue end
+			local d = pos:DistToSqr(hitPos)
+			if d < bestDist then bestDist = d; bestLimb = limbId end
+		end
+	end
+	return bestLimb or fallback
+end
+
 -----------------------------------------------------------------------------------------------------------------------
 -- DAMAGE
 -----------------------------------------------------------------------------------------------------------------------
@@ -226,6 +249,7 @@ function WB.SurfaceCut(ply, limbId, force, surface)
 
 	if force <= jump * 1.2 or math.random(2) ~= 1 then return false end
 
+	-- RU: standing touch on glass with foot/hand (non-ragdoll) is handled via GlassTouch hook below; here rough-surface bleed only
 	l.skin = math.Clamp((l.skin or 100) - force * 0.8, 0, 100)
 	l.bleed = math.Clamp((l.bleed or 0) + force * 0.2, 0, 100)
 	if H.Fn and H.Fn.ClearLimbBandage then H.Fn.ClearLimbBandage(l) end
@@ -233,6 +257,36 @@ function WB.SurfaceCut(ply, limbId, force, surface)
 
 	return true
 end
+
+-- RU: standing player touches glass with leg/hand (not ragdoll) — embed in that exact limb (which foot/hand hit)
+local function IsGlassEnt(ent)
+	if not IsValid(ent) then return false end
+	if ent:GetClass() == "func_breakable_surf" then return true end
+	if ent:GetClass() == "func_breakable" and ent:GetMaterialType() == MAT_GLASS then return true end
+	if string.find(string.lower(ent:GetClass()), "glass") then return true end
+	return false
+end
+local glassTouchCooldown = {}
+hook.Add("Touch", "WoundBridge_GlassTouchLimbs", function(ent, other)
+	local ply, glass
+	if IsValid(ent) and ent:IsPlayer() and IsValid(other) and IsGlassEnt(other) then ply, glass = ent, other
+	elseif IsValid(other) and other:IsPlayer() and IsValid(ent) and IsGlassEnt(ent) then ply, glass = other, ent
+	else return end
+	if not WB.IsBridged(ply) then return end
+	if IsValid(ply.FakeRagdoll) then return end -- ragdoll path already handled via ApplyCollision/SurfaceCut
+	local vel = ply:GetVelocity():Length()
+	if vel < 60 then return end
+	local hitPos = glass:GetPos()
+	if ply:GetPos():Distance(hitPos) > 250 then return end
+	local limb = WB.PickHitLimb(ply, hitPos, nil)
+	if not limb then return end
+	-- per-limb throttle like physics damage
+	ply._nextLimbPhysicsDamage = ply._nextLimbPhysicsDamage or {}
+	local now = CurTime()
+	if (ply._nextLimbPhysicsDamage[limb] or 0) > now then return end
+	ply._nextLimbPhysicsDamage[limb] = now + 0.6
+	WB.AddShrapnelForGlass(ply, limb, 1)
+end)
 
 --- Impact force of a ragdoll collision in C:U units (same conversion C:U uses for its own ragdoll: speed * |cos| / 50)
 function WB.ImpactForce(ply, speed, dot, massK)
