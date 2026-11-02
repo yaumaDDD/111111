@@ -1077,6 +1077,26 @@ WoundSystemLimbUIConfig = {
                 OffsetY = -60,
                 TextOffsetX = -92,
                 TextOffsetY = -20
+            },
+            GLASS_SHARD = {
+                Text = "PULL SHARD",
+                TooltipKey = "glass_shard",
+                Width = 170,
+                Height = 60,
+                OffsetX = 0,
+                OffsetY = -60,
+                TextOffsetX = -78,
+                TextOffsetY = -20
+            },
+            BANDAGE = {
+                Text = "BANDAGE",
+                TooltipKey = "bandage",
+                Width = 140,
+                Height = 60,
+                OffsetX = 0,
+                OffsetY = -60,
+                TextOffsetX = -60,
+                TextOffsetY = -20
             }
         }
     },
@@ -1819,6 +1839,20 @@ local function RequestRemoveLimbStatus(limbId, statusId)
     net.Start("WoundSystem_RemoveLimbStatus")
         net.WriteString(limbId)
         net.WriteString(statusId)
+    net.SendToServer()
+end
+
+local function RequestGlassHandExtract(limbId)
+    if not limbId or limbId == "" then return end
+    net.Start("WoundSystem_GlassHandExtract")
+        net.WriteString(limbId)
+    net.SendToServer()
+end
+
+local function RequestHudBandage(limbId)
+    if not limbId or limbId == "" then return end
+    net.Start("WoundSystem_HudBandage")
+        net.WriteString(limbId)
     net.SendToServer()
 end
 
@@ -3708,19 +3742,47 @@ end
 
 WoundSystemActionButtonPos = WoundSystemActionButtonPos or {x = nil, y = nil}
 
+local function HasBandageInHandsHUD()
+    local ply = LocalPlayer()
+    if not IsValid(ply) then return false end
+    local wep = ply:GetActiveWeapon()
+    if not IsValid(wep) then return false end
+    local c = wep:GetClass()
+    return c == "weapon_bandage_sh" or c == "weapon_bigbandage_sh" or c == "weapon_medkit_sh" or c == "weapon_gauze" or string.find(c, "bandage")
+end
+
 function WoundSystemDrawLimbActionPoint(limbId, state, pointPos, bX, bY, scale, dollScale, mx, my, isClicking, lastMouseState, minigameActive)
     local actionStatus = nil
 
-    if state.customStatuses and state.customStatuses["TOURNIQUET"] then
+    if state.customStatuses and state.customStatuses["GLASS_SHARD"] and tonumber(state.customStatuses["GLASS_SHARD"]) > 0 then
+        actionStatus = "GLASS_SHARD"
+    elseif (state.glassShards or 0) > 0 then
+        actionStatus = "GLASS_SHARD"
+    elseif state.customStatuses and state.customStatuses["TOURNIQUET"] then
         actionStatus = "TOURNIQUET"
     elseif state.customStatuses and state.customStatuses["SPLINTED"] then
         actionStatus = "SPLINTED"
     elseif state.dislocated then
         actionStatus = "DISLOCATION"
+    else
+        -- BANDAGE via HUD when holding bandage in hands, bleeding and no glass
+        if state and not state.dismembered and not state.isBandaged and (state.bleed or 0) > 0.08 then
+            if HasBandageInHandsHUD() then
+                -- also ensure no glass blocks
+                local hasGlass = (state.customStatuses and state.customStatuses["GLASS_SHARD"] and tonumber(state.customStatuses["GLASS_SHARD"]) > 0) or (state.glassShards or 0) > 0
+                if not hasGlass then
+                    actionStatus = "BANDAGE"
+                end
+            end
+        end
     end
 
     if not actionStatus then return end
     if actionStatus == "DISLOCATION" and not state.dislocated then return end
+    if actionStatus == "GLASS_SHARD" and not (state.customStatuses and state.customStatuses["GLASS_SHARD"] or state.glassShards) then
+        -- fallback check via WoundSystemClientState handled above, but keep
+        if not ((state.customStatuses and tonumber(state.customStatuses["GLASS_SHARD"] or 0) > 0) or (state.glassShards or 0) > 0) then return end
+    end
 
     local pointCfg = WoundSystemLimbUIConfig.ActionPoint or {}
     local actionCfg = (pointCfg.Actions and pointCfg.Actions[actionStatus]) or {}
@@ -3769,6 +3831,10 @@ function WoundSystemDrawLimbActionPoint(limbId, state, pointPos, bX, bY, scale, 
     if hoveringPoint and isClicking and not GUIState.lastMouseState and not minigameActive then
         if actionStatus == "DISLOCATION" then
             RequestDislocationMinigameStart(limbId)
+        elseif actionStatus == "GLASS_SHARD" then
+            RequestGlassHandExtract(limbId)
+        elseif actionStatus == "BANDAGE" then
+            RequestHudBandage(limbId)
         else
             RequestRemoveLimbStatus(limbId, actionStatus)
         end

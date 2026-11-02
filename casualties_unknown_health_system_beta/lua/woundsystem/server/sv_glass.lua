@@ -10,6 +10,7 @@ pcall(function() util.AddNetworkString("WoundSystem_GlassRequest") end)
 pcall(function() util.AddNetworkString("WoundSystem_GlassSuccess") end)
 pcall(function() util.AddNetworkString("WoundSystem_GlassPain") end)
 pcall(function() util.AddNetworkString("WoundSystem_GlassFaint") end)
+pcall(function() util.AddNetworkString("WoundSystem_GlassHandExtract") end)
 
 -- Helper to check if player has glass in limb
 local function HasGlass(ply, limbId)
@@ -19,20 +20,17 @@ local function HasGlass(ply, limbId)
     return false
 end
 
--- Player requests to start extraction for chosen limb via radial menu
-net.Receive("WoundSystem_GlassRequest", function(_, ply)
-    if not IsValid(ply) or not ply:Alive() then return end
-    local limbId = net.ReadString()
-    if not limbId or limbId == "" then return end
-    -- validate limb belongs to player
+-- Helper: hand extraction (unit menu, no tweezers minigame)
+local function DoHandExtract(ply, limbId)
+    if not IsValid(ply) or not ply:Alive() then return false end
+    if not limbId or limbId == "" then return false end
     local H = WoundSystem.Health
     local PlayerLimbs = H and (H.PlayerLimbs or _G.PlayerLimbs)
-    if not PlayerLimbs or not PlayerLimbs[ply] or not PlayerLimbs[ply][limbId] then return end
+    if not PlayerLimbs or not PlayerLimbs[ply] or not PlayerLimbs[ply][limbId] then return false end
     if not HasGlass(ply, limbId) then
         if ply.Notify then ply:Notify("No glass shard in "..limbId, 1, "glass_no", 1, nil, Color(255,180,120,255)) end
-        return
+        return false
     end
-    -- pain block check like dislocation: if pain too high need analgesia
     local body = H.BodyState and H.BodyState[ply] or nil
     local painBlocked = false
     if body then
@@ -42,16 +40,37 @@ net.Receive("WoundSystem_GlassRequest", function(_, ply)
         if (PlayerLimbs[ply][limbId].pain or 0) > 78 and opiate < 0.6 then painBlocked = true end
     end
     if painBlocked then
-        ply:Notify("Too much pain to focus - take Z-City painkiller first", 1, "glass_painblock", 2, nil, Color(255,120,120,255))
-        return
+        ply:Notify("Too much pain - take Z-City painkiller first", 1, "glass_painblock", 2, nil, Color(255,120,120,255))
+        return false
     end
+    -- hands extraction: instant, moderate pain
+    if WoundSystem.GlassShard and WoundSystem.GlassShard.RemoveOne then
+        WoundSystem.GlassShard.RemoveOne(ply, limbId)
+        ply:EmitSound("physics/flesh/flesh_impact_hard6.wav", 58)
+        -- extra pain from hands pulling
+        local st = PlayerLimbs[ply][limbId]
+        if st then st.pain = math.Clamp((st.pain or 0) + 6, 0, 100) end
+        if H.SendLimbUpdate then H.SendLimbUpdate(ply, limbId, true) end
+        if H.SendCardioUpdate then H.SendCardioUpdate(ply, true) end
+        if HasGlass(ply, limbId) then
+            ply:Notify("Another shard remains in "..limbId.." - pull again", 1, "glass_more", 2, nil, Color(180,220,255,255))
+        else
+            ply:Notify("Glass shard pulled out from "..limbId.." by hands", 1, "glass_done", 2, nil, Color(120,255,120,255))
+        end
+        return true
+    end
+    return false
+end
 
-    -- start minigame
-    net.Start("WoundSystem_GlassStart")
-        net.WriteString(limbId)
-    net.Send(ply)
-    ply._woundSystemGlassLimb = limbId
-    ply._woundSystemGlassFailCount = 0
+-- Player requests to start extraction (now direct hand extract, not tweezers minigame)
+net.Receive("WoundSystem_GlassRequest", function(_, ply)
+    local limbId = net.ReadString()
+    DoHandExtract(ply, limbId)
+end)
+
+net.Receive("WoundSystem_GlassHandExtract", function(_, ply)
+    local limbId = net.ReadString()
+    DoHandExtract(ply, limbId)
 end)
 
 -- Client reports pain increment on miss

@@ -1,9 +1,11 @@
 -- Server: handle radial heal requests (bandage via menu with item in hands, extraction prerequisite)
 if SERVER then
 
-util.AddNetworkString("WoundSystem_RadialHeal")
-util.AddNetworkString("WoundSystem_RadialHealOther")
-util.AddNetworkString("WoundSystem_GlassRequestOther")
+pcall(function() util.AddNetworkString("WoundSystem_RadialHeal") end)
+pcall(function() util.AddNetworkString("WoundSystem_RadialHealOther") end)
+pcall(function() util.AddNetworkString("WoundSystem_GlassRequestOther") end)
+pcall(function() util.AddNetworkString("WoundSystem_HudBandage") end)
+pcall(function() util.AddNetworkString("WoundSystem_GlassHandExtract") end)
 
 local BANDAGE_MAP = {
     weapon_bandage_sh = {item="GAUZE", durNeed=8},
@@ -143,6 +145,14 @@ net.Receive("WoundSystem_RadialHeal", function(len, ply)
     TryBandage(ply, target, limbId)
 end)
 
+net.Receive("WoundSystem_HudBandage", function(len, ply)
+    if not IsValid(ply) or not ply:Alive() then return end
+    local limbId = net.ReadString()
+    if not limbId or limbId == "" then return end
+    -- HUD always for self (Examine Body self); could also support other but self first
+    TryBandage(ply, ply, limbId)
+end)
+
 net.Receive("WoundSystem_RadialHealOther", function(len, ply)
     if not IsValid(ply) or not ply:Alive() then return end
     local target = net.ReadEntity()
@@ -151,7 +161,7 @@ net.Receive("WoundSystem_RadialHealOther", function(len, ply)
     TryBandage(ply, target, limbId)
 end)
 
--- Glass extraction for other player via radial
+-- Glass extraction for other player via hands (no tweezers)
 net.Receive("WoundSystem_GlassRequestOther", function(len, ply)
     if not IsValid(ply) or not ply:Alive() then return end
     local target = net.ReadEntity()
@@ -160,59 +170,22 @@ net.Receive("WoundSystem_GlassRequestOther", function(len, ply)
     if ply:GetPos():DistToSqr(target:GetPos()) > 250*250 then ply:Notify("Too far",1,"glass_far",1,nil,Color(255,180,120,255)) return end
     if not WoundSystem or not WoundSystem.GlassShard or not WoundSystem.GlassShard.HasShard then return end
     if not WoundSystem.GlassShard.HasShard(target, limbId) then ply:Notify("No glass in "..limbId.." of "..target:Nick(),1,"glass_no_other",1,nil,Color(255,180,120,255)) return end
-    -- reuse existing glass request logic: send GlassStart to requestor? But extraction should be on target's limb, but minigame is per-player. 
-    -- For other player, we allow the healer to extract: remove shard from target
-    -- We will directly trigger extraction success path after minigame? For now, we start minigame for healer that will operate on target limb
-    -- Store target for success
-    ply._woundSystemGlassTarget = target
-    ply._woundSystemGlassLimb = limbId
-    net.Start("WoundSystem_GlassStart")
-        net.WriteString(limbId)
-    net.Send(ply)
-end)
-
--- Intercept GlassSuccess to support other-player extraction
-hook.Add("WoundSystem_GlassShardRemoved", "GlassRadial_OtherFix", function(ply, limbId)
-    -- placeholder: if healer extracted from other, this is handled via modified success handler below
-end)
-
--- Override GlassSuccess to check if it was for other player
-local origGlassSuccess = nil
-timer.Simple(0.5, function()
-    -- patch net receiver for GlassSuccess after sv_glass.lua loaded
-    local rec = net.Receivers and net.Receivers["WoundSystem_GlassSuccess"]
-    if rec then
-        origGlassSuccess = rec
-        net.Receive("WoundSystem_GlassSuccess", function(len, ply)
-            if not IsValid(ply) or not ply:Alive() then return end
-            local limbId = net.ReadString()
-            local target = ply._woundSystemGlassTarget or ply
-            if WoundSystem and WoundSystem.GlassShard and WoundSystem.GlassShard.HasShard then
-                if not WoundSystem.GlassShard.HasShard(target, limbId) then return end
-                WoundSystem.GlassShard.RemoveOne(target, limbId)
-                ply:EmitSound("physics/flesh/flesh_impact_hard6.wav",58)
-                local H = WoundSystem.Health
-                local PlayerLimbs = H and H.PlayerLimbs and H.PlayerLimbs[target]
-                if PlayerLimbs and PlayerLimbs[limbId] then
-                    PlayerLimbs[limbId].pain = math.Clamp((PlayerLimbs[limbId].pain or 0) -10,0,100)
-                    if H.SendLimbUpdate then H.SendLimbUpdate(target, limbId, true) end
-                end
-                if target ~= ply then
-                    ply:Notify("Removed glass from "..target:Nick().." "..limbId,1,"glass_done_other",1,nil,Color(120,255,120,255))
-                    target:Notify(ply:Nick().." removed glass from "..limbId,1,"glass_done_target",1,nil,Color(120,255,120,255))
-                else
-                    if WoundSystem.GlassShard.HasShard(target, limbId) then
-                        ply:Notify("Another shard remains in "..limbId,1,"glass_more",1,nil,Color(180,220,255,255))
-                    else
-                        ply:Notify("Glass shard removed from "..limbId,1,"glass_done",1,nil,Color(120,255,120,255))
-                    end
-                end
-            end
-            ply._woundSystemGlassLimb = nil
-            ply._woundSystemGlassTarget = nil
-            ply._woundSystemGlassFailCount = 0
-        end)
+    -- direct hand extraction on target
+    WoundSystem.GlassShard.RemoveOne(target, limbId)
+    ply:EmitSound("physics/flesh/flesh_impact_hard6.wav",58)
+    target:EmitSound("physics/flesh/flesh_impact_hard6.wav",58)
+    -- pain on target
+    local H = WoundSystem.Health
+    local limbs = H and H.PlayerLimbs and H.PlayerLimbs[target]
+    if limbs and limbs[limbId] then
+        limbs[limbId].pain = math.Clamp((limbs[limbId].pain or 0) + 6,0,100)
+        if H.SendLimbUpdate then H.SendLimbUpdate(target, limbId, true) end
+        if H.SendCardioUpdate then H.SendCardioUpdate(target, true) end
     end
+    ply:Notify("Pulled glass from "..target:Nick().." "..limbId.." by hands",1,"glass_done_other",1,nil,Color(120,255,120,255))
+    target:Notify(ply:Nick().." pulled glass from "..limbId,1,"glass_done_target",1,nil,Color(120,255,120,255))
 end)
+
+-- Glass extract complete - handled via direct hand extraction, no minigame override needed
 
 end
