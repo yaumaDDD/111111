@@ -56,7 +56,7 @@ function ENT:ActivateExplosive()
 	local bullet = {}
 	bullet.Force = 2
 	bullet.Damage = 10
-	-- SHRAPNEL REMOVED bullet.AmmoType="Metal Debris"
+	bullet.AmmoType = "Metal Debris"
 	bullet.Attacker = self.owner
 	bullet.Distance = 56756
 	bullet.Callback = hg.bulletHit
@@ -65,10 +65,40 @@ function ENT:ActivateExplosive()
 	bullet.DisableLagComp = true
 	bullet.Filter = {self}
 
-	-- SHRAPNEL REMOVED: claymore blast only
-	self.ShrapnelDone = true
+	local co = coroutine.create(function()
+		local LastShrapnel = SysTime()
 
-	-- SHRAPNEL REMOVED -- SHRAPNEL REMOVED
+		for i = 1, num do
+			LastShrapnel = SysTime()
+
+			local dir = (ang + Angle(math.Rand(-12, 2), math.Rand(-30, 30), 0)):Forward()
+			dir:Normalize()
+
+			local tr = util.TraceLine({
+				start = pos,
+				endpos = pos + dir * bullet.Distance,
+				filter = bullet.Filter,
+				mask = MASK_SHOT
+			})
+			if i > 100 and tr.Entity == game.GetWorld() then util.Decal("ExplosiveGunshot",tr.HitPos+tr.HitNormal,tr.HitPos-tr.HitNormal) continue end
+
+			bullet.Src = pos
+			bullet.Dir = dir
+			bullet.Penetration = math.Clamp(num / i, 5, 10) * 10
+			if not IsValid(self) then return end
+			self:FireLuaBullets(bullet,true)
+
+			LastShrapnel = SysTime() - LastShrapnel
+
+			if LastShrapnel > 0.001 then
+				coroutine.yield()
+			end
+		end
+
+		self.ShrapnelDone = true
+	end)
+
+	coroutine.resume(co)
 
 	local index = self:EntIndex()
 
@@ -77,7 +107,7 @@ function ENT:ActivateExplosive()
 			timer.Remove("GrenadeCheck_" .. index)
 		end
 
-		-- SHRAPNEL REMOVED coroutine.resume(co)
+		coroutine.resume(co)
 
 		if self.ShrapnelDone then
 			util.ScreenShake(selfPos, 20, 20, 1, self.ConcussionDis)

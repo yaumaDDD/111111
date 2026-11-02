@@ -303,14 +303,14 @@ local function ExplodeTheItem(self,ent)
 								bullet.Src = EntPos
 								bullet.Force = 0.01
 								bullet.Damage = BlastDamage
-								-- SHRAPNEL REMOVED bullet.AmmoType="Metal Debris"
+								bullet.AmmoType = "Metal Debris"
 								bullet.Attacker = self:GetOwner()
 								bullet.Distance = 205
 								bullet.DisableLagComp = true
 								bullet.Filter = {ent}
 								bullet.Penetration = 4
 								--bullet.Spread = vecCone * i / self.Fragmentation
-								ent:-- SHRAPNEL REMOVED FireLuaBullets(bullet, true)
+								ent:FireLuaBullets(bullet, true)
 							end
 
 							LastShrapnel = SysTime() - LastShrapnel

@@ -135,7 +135,25 @@ function ENT:Detonate()
 
 	timer.Simple(0, function()
 		if not IsValid(self) then return end
-			-- SHRAPNEL REMOVED: blast only
+		if self.Oskole then 
+			local vecCone = Vector(5, 5, 0)
+			
+			for i = 1, self.Fragmentation do
+				local bullet = {}
+				bullet.Src = SelfPos
+				bullet.Spread = vecCone
+				bullet.Force = 0.01
+				bullet.Damage = self.BlastDamage
+				bullet.AmmoType = "Metal Debris"
+				bullet.Attacker = Owner
+				bullet.Distance = 205
+				bullet.DisableLagComp = true
+				bullet.Filter = {}
+				bullet.Dir = self:GetAngles():Forward() * math.random(-1,1)
+				bullet.Spread = vecCone * (i / self.Fragmentation)
+				self:FireLuaBullets(bullet, true)
+			end
+		end
 		util.ScreenShake(SelfPos,100,200,1,1000)
 	end)
 
