@@ -8013,6 +8013,23 @@ function WoundSystem.Health.ApplyItemToBody(target, itemId, limbId, amount, opts
     if not PlayerLimbs[target] then InitPlayer(target) end
     if not GetLimbState(target, limbId) then return false end
 
+    -- RU: logical prerequisite: must remove glass shards before bandage can succeed
+    do
+        local bandageIds = {GAUZE=true, STERILIZEDBANDAGE=true, PLASTICBANDAGE=true, ANALGESICGAUZE=true, ADHESIVEBANDAGE=true, RAG=true, RIPPEDDRESSING=true}
+        if bandageIds[itemId] then
+            local st = PlayerLimbs[target] and PlayerLimbs[target][limbId]
+            if st and st.customStatuses and st.customStatuses["GLASS_SHARD"] and tonumber(st.customStatuses["GLASS_SHARD"]) > 0 then
+                if IsValid(target) and target.Notify then target:Notify("Remove glass shard from "..(limbId or "?").." before bandaging!", 1, "glass_block_bandage", 1, nil, Color(255,170,120,255)) end
+                return false
+            end
+            -- also check legacy glassShards field
+            if st and (st.glassShards or 0) > 0 then
+                if IsValid(target) and target.Notify then target:Notify("Remove glass obstruction from "..limbId.." first!", 1, "glass_block2", 1, nil, Color(255,170,120,255)) end
+                return false
+            end
+        end
+    end
+
     local use = item.use or {}
     if WoundSystem.Items.LimbAllowed and not WoundSystem.Items.LimbAllowed(use, limbId) then return false end
 

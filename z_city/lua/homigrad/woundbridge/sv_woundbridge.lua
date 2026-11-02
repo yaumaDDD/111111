@@ -169,6 +169,8 @@ end
 -----------------------------------------------------------------------------------------------------------------------
 -- COLLISIONS, FALLS  (Z-City filters/structure, the damage itself is the C:U impact model)
 -----------------------------------------------------------------------------------------------------------------------
+-- glass surfaces should embed shards even on light bump per RU
+local glassCutSurfaces = {glass=true, glassbottle=true, glassfloor=true, brokenglass=true, glass_breakable=true}
 --- Rough surfaces / glass cut the limb that hit them (Z-City: `bleedSurfaces`, 50%)
 function WB.SurfaceCut(ply, limbId, force, surface)
 	local H = Health()
@@ -178,6 +180,24 @@ function WB.SurfaceCut(ply, limbId, force, surface)
 	if not l or l.dismembered then return false end
 
 	local jump = (body and body.jumpSpeed) or 6.5
+	-- RU: glass shards on any glass contact even light bump: embed shard even at low force
+	if surface and glassCutSurfaces[surface] then
+		if force > jump * 0.35 then
+			WB.GlassShard(ply, limbId, 1)
+			l.skin = math.Clamp((l.skin or 100) - math.max(force * 0.6, 6), 0, 100)
+			l.bleed = math.Clamp((l.bleed or 0) + math.max(force * 0.15, 4), 0, 100)
+			if H.Fn and H.Fn.ClearLimbBandage then H.Fn.ClearLimbBandage(l) end
+			if H.SendLimbUpdate then H.SendLimbUpdate(ply, limbId, true) end
+			return true
+		end
+		-- even very light bump still embeds
+		if force > jump * 0.12 then
+			WB.GlassShard(ply, limbId, 1)
+			if H.SendLimbUpdate then H.SendLimbUpdate(ply, limbId, true) end
+			return true
+		end
+	end
+
 	if force <= jump * 1.2 or math.random(2) ~= 1 then return false end
 
 	l.skin = math.Clamp((l.skin or 100) - force * 0.8, 0, 100)

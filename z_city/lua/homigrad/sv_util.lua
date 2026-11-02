@@ -1352,8 +1352,8 @@ end
 	end)
 
 	hook.Add("PostEntityTakeDamage", "GlassShards", function(ent, dmginfo)
-		if IsValid(ent) and math.random(4) == 2 then
-			if ent:GetClass() == "func_breakable_surf" or (ent:GetClass() == "func_breakable" and ent:GetMaterialType() == MAT_GLASS) then
+		if IsValid(ent) then
+			if ent:GetClass() == "func_breakable_surf" or (ent:GetClass() == "func_breakable" and ent:GetMaterialType() == MAT_GLASS) or string.find(string.lower(ent:GetClass()), "glass") then
 				local glass = ents.Create("weapon_hg_glassshard")
 				local inf = dmginfo:GetInflictor()
 				glass:SetPos(IsValid(inf) and inf:GetPos() or dmginfo:GetAttacker():GetPos())
@@ -1374,13 +1374,23 @@ end
 						limb = attacker._lastGlassHand or "hand_R"
 					end
 					-- также пробуем по ближайшей костяшке к стеклу
-					if attacker:GetPos():Distance(glass:GetPos()) < 120 then
+					-- RU: shards everywhere: embed into multiple limbs, not just hand
+				if attacker:GetPos():Distance(glass:GetPos()) < 300 then
 						hg.WoundBridge.GlassShard(attacker, limb, 1)
+						-- additional random shard to represent "везде" (everywhere)
+						if math.random(2) == 1 then
+							local extra = ({"forearm_R","forearm_L","thorax","head"})[math.random(4)]
+							hg.WoundBridge.GlassShard(attacker, extra, 1)
+						end
 					else
-						-- если разбили на дистанции (выстрелом), осколок может попасть в любую открытую часть - торс/руки
+						-- distant shot: still embed, spread to 1-2 random limbs
 						local hitgroup = attacker:LastHitGroup()
 						local wbLimb = hg.WoundBridge.ResolveLimb and hg.WoundBridge.ResolveLimb(attacker, nil, hitgroup) or nil
 						hg.WoundBridge.GlassShard(attacker, wbLimb or "forearm_R", 1)
+						if math.random(3) == 1 then
+							local extra2 = ({"hand_R","hand_L","arm_R","arm_L"})[math.random(4)]
+							hg.WoundBridge.GlassShard(attacker, extra2, 1)
+						end
 					end
 				end
 			end

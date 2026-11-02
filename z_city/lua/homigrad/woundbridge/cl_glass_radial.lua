@@ -1,31 +1,7 @@
 -- RU: круговой селектор - выбор конечности для извлечения осколка стекла (только вручную)
--- Мини-игра стартует исключительно после того как человек запустил её сам
+-- Fixed: correct PNG handling moved to cl_glass.lua, radial now works with item-in-hands logic
 if CLIENT then
 
-local function HasGlassOnLimb(limbId)
-    -- try to read from WoundSystem local limb cache if available
-    -- fallback via organism flag? We store via net var from bridge
-    -- Simple check: if local player organism sync had glass? Instead we check via NW or via C:U HUD data
-    -- Instead we expose via net message query? For radial we just check if any limb known to have glass via local table
-    if WoundSystemGlassMinigame and WoundSystemGlassMinigame._glassLimbs then
-        return WoundSystemGlassMinigame._glassLimbs[limbId]
-    end
-    -- fallback: check BodyState via C:U client if exposed
-    if LocalPlayer().organism and LocalPlayer().organism._glassLimb then return true end
-    return false
-end
-
--- Listen for shard updates from server
-net.Receive("WoundSystem_GlassStart", function()
-    -- handled in cl_glass.lua, this file just adds radial
-end)
-
-hook.Add("Initialize", "WoundSystem_GlassRadial_Init", function()
-    hook.Remove("radialOptions", "WoundSystem_GlassShard")
-end)
-
--- Build list of limbs that have glass: query server? For now we offer limb selector always if player has any glass
--- Server will validate, so radial can show all glass-bearing limbs
 local allLimbs = {
     "head","thorax","abdomen",
     "arm_L","forearm_L","hand_L",
@@ -34,13 +10,6 @@ local allLimbs = {
     "thigh_R","crus_R","foot_R"
 }
 
-local function PlayerHasAnyGlass()
-    -- Check via WoundSystem client data via cl_health_gui? Use net request polling
-    -- We can store latest server push via net
-    return true -- we let server validate; show selector if we have at least 1 shard known? For MVP show always when player can have glass
-end
-
--- Maintain known glass limbs via sync from server (we push on embed)
 if not WoundSystemGlassMinigame then WoundSystemGlassMinigame = {} end
 WoundSystemGlassMinigame._glassLimbs = WoundSystemGlassMinigame._glassLimbs or {}
 
@@ -53,28 +22,37 @@ net.Receive("WoundSystem_GlassSync", function()
     end
 end)
 
-hook.Add("radialOptions", "WoundSystem_GlassShard", function()
-    if not IsValid(LocalPlayer()) or not LocalPlayer():Alive() or (LocalPlayer().organism and LocalPlayer().organism.otrub) then return end
-
-    -- Check if we have any glass shards locally; if not, skip to avoid spam
-    local hasAny = false
-    for _, limb in ipairs(allLimbs) do
-        if WoundSystemGlassMinigame._glassLimbs[limb] then hasAny = true break end
+local function ClientHasGlassFallback(limbId)
+    -- Direct check via WoundSystemClientState if available, without waiting for sync
+    if WoundSystemClientState and WoundSystemClientState.PlayerLimbs and WoundSystemClientState.PlayerLimbs[limbId] then
+        local st = WoundSystemClientState.PlayerLimbs[limbId]
+        if st and st.customStatuses and st.customStatuses["GLASS_SHARD"] and tonumber(st.customStatuses["GLASS_SHARD"]) > 0 then return true end
+        if st and (st.glassShards or 0) > 0 then return true end
     end
-    -- If we don't know yet, ask server via small throttle
-    if not hasAny then
-        -- fallback: if player recently had glass embedding, still show selector for all limbs (server will reject if no glass)
-        -- To avoid empty radial spam, we check if any limb pain high? Instead just show generic option
-        -- Show generic extract option that opens limb chooser
-        if table.Count(WoundSystemGlassMinigame._glassLimbs) == 0 then
-            -- we haven't received sync yet, don't spam radial; allow manual command via console
-            return
+    return false
+end
+
+local function GetHasGlassSet()
+    local has = {}
+    local found = false
+    for _, limb in ipairs(allLimbs) do
+        if WoundSystemGlassMinigame._glassLimbs[limb] or ClientHasGlassFallback(limb) then
+            has[limb] = true
+            found = true
         end
     end
+    return has, found
+end
 
-    -- Primary radial option: opens sub-menu to choose limb
-    -- For simplicity, add per-limb options directly to radial
-    for limbId,_ in pairs(WoundSystemGlassMinigame._glassLimbs) do
+hook.Add("radialOptions", "WoundSystem_GlassShard", function()
+    if not IsValid(LocalPlayer()) or not LocalPlayer():Alive() then return end
+    if LocalPlayer().organism and LocalPlayer().organism.otrub then return end
+
+    local hasSet, hasAny = GetHasGlassSet()
+    if not hasAny then return end
+
+    -- Add per-limb extraction options; they will be shown as separate radial slices
+    for limbId,_ in pairs(hasSet) do
         local tbl = {
             function()
                 RunConsoleCommand("woundsys_glass_extract", limbId)
@@ -85,10 +63,14 @@ hook.Add("radialOptions", "WoundSystem_GlassShard", function()
     end
 end)
 
--- Fallback generic option when we don't have precise sync but player knows they have glass (e.g., HUD icon)
--- Also add console helper
 concommand.Add("hg_glass_limbs", function()
     PrintTable(WoundSystemGlassMinigame._glassLimbs)
+    if WoundSystemClientState and WoundSystemClientState.PlayerLimbs then
+        print("--- ClientState ---")
+        for id, st in pairs(WoundSystemClientState.PlayerLimbs) do
+            if st.customStatuses and st.customStatuses["GLASS_SHARD"] then print(id, st.customStatuses["GLASS_SHARD"]) end
+        end
+    end
 end)
 
 end

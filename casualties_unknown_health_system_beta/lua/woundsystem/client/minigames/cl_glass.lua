@@ -1,5 +1,5 @@
 -- GLASS SHARD MINIGAME - RU: осколки стекла с пинцетом, боль растёт при неудачах до обморока
--- Reuses dislocation hand physics + standard png per RU requirement
+-- Fixed: correct PNG, working hover/click, light-bump shards everywhere via woundbridge
 
 if WoundSystemGlassMinigame and WoundSystemGlassMinigame._Loaded then
     if IsValid(WoundSystemGlassMinigame.overlay) then
@@ -22,63 +22,38 @@ WoundSystemGlassMinigame = WoundSystemGlassMinigame or {}
 local MG = WoundSystemGlassMinigame
 MG._Loaded = true
 
--- KEEP STANDARD PNG per RU: use same dislocation png + shrapnel png if present
-local path = "casunknown-images/dislocationminigame/"
-local shrapnelPath = "casunknown-images/"
-local matBoneBase = Material(path .. "dislocationBoneBase.png")
-local matBoneGhost = Material(path .. "dislocationBoneGhost.png")
-local matBoneMove = Material(path .. "dislocationBoneMove.png")
-local matHandIdle = Material(path .. "handgraspidle1.png")
-local matHandClick = Material(path .. "handgraspclick.png")
--- fallback for shard visual: use small shrapnel icon if exists, else reuse bone
-local matShard = Material(shrapnelPath .. "minigameshrapnel.png")
-if matShard:IsError() then matShard = matBoneMove end
+-- CORRECT PNG per RU: use shrapnelminigame assets (exist in workshop), not dislocation
+local path = "casunknown-images/shrapnelminigame/"
+local shrapnelPath = path
+local matBackground = Material(path .. "minigameShrapnel.png")
+local matShard = Material(path .. "shrapnelpiece.png")
+if matShard:IsError() then matShard = Material(path .. "shrapnelpiece_red.png") end
+-- hand / tweezers mats (exist in shrapnel pack)
+local matHandIdle = Material(path .. "handGraspIdle1.png")
+local matHandClick = Material(path .. "handGraspClick.png")
+local matTweezersIdle = Material(path .. "handTweezersIdle.png")
+local matTweezersClick = Material(path .. "handTweezersClick.png")
+if matTweezersIdle:IsError() then matTweezersIdle = matHandIdle end
+if matTweezersClick:IsError() then matTweezersClick = matHandClick end
 
--- same config as dislocation for feel
+-- fallback if background missing (should not, but keep)
+if matBackground:IsError() then
+    matBackground = Material("casunknown-images/dislocationminigame/dislocationBoneBase.png")
+end
+if matShard:IsError() then
+    -- ultimate fallback: reuse dislocation bone move (visible, not water)
+    matShard = Material("casunknown-images/dislocationminigame/dislocationBoneMove.png")
+end
+
+-- config similar to dislocation but tuned for glass shard
 local DEFAULT_CONFIG = {
     Scale = 0.95,
     CenterOffsetX = 0,
     CenterOffsetY = 0,
-    BoneBaseWidth = 552,
-    BoneBaseHeight = 324,
-    BoneBaseOffsetX = -900,
-    BoneBaseOffsetY = 0,
-    BoneBaseRotation = 0,
-    BoneBaseAlpha = 235,
-    BoneGhostWidth = 1220,
-    BoneGhostHeight = 356,
-    BoneGhostOffsetX = -25,
-    BoneGhostOffsetY = 0,
-    BoneGhostRotation = 0,
-    BoneGhostAlpha = 95,
-    BoneMoveWidth = 1292,
-    BoneMoveHeight = 480,
-    BoneMoveOffsetX = 0,
-    BoneMoveOffsetY = 0,
-    BoneMoveRotation = 0,
-    BoneMoveAlpha = 255,
-    BoneHitboxWidthFactor = 2.4,
-    BoneHitboxHeightFactor = 0.5,
-    HandWidth = 512,
-    HandHeight = 1260,
-    HandScale = 3,
-    HandOffsetX = 300,
-    HandOffsetY = 1200,
-    HandHitOffsetX = 0,
-    HandHitOffsetY = 0,
-    HandPivotX = 0.4,
-    HandPivotY = 0.1,
-    HandRotation = 0,
-    HandAlpha = 210,
+    HandScale = 1.0,
     PainShakeX = 120,
     PainShakeY = 40,
-    HandMaxLength = 75,
-    BoneVisualFollowSpeed = 16,
-    HitPulseTime = 0.16
 }
-
-local FINISH_X = 421.82
-local FINISH_Y = 229.82
 
 local function GetCfg()
     local cfg = DevMinigameCfg.glass or DevMinigameCfg.dislocation or {}
@@ -87,40 +62,71 @@ local function GetCfg()
     return out
 end
 
+-- state
+MG.active = MG.active or false
+MG.sessionId = MG.sessionId or 0
+MG.limbId = MG.limbId or nil
+MG.overlay = MG.overlay or nil
+MG.handScreenX = MG.handScreenX or ScrW()*0.5
+MG.handScreenY = MG.handScreenY or ScrH()*0.5
+MG.handScreenVelX = MG.handScreenVelX or 0
+MG.handScreenVelY = MG.handScreenVelY or 0
+MG._hp_acc = MG._hp_acc or 0
+MG.openTime = MG.openTime or 0
+MG.failCount = MG.failCount or 0
+
 local activeLimb = nil
-local sim = nil -- HandPhysics instance
-local startTime = 0
 local failCount = 0
-local totalTime = 0
 local holding = false
 local shardX, shardY = 0,0
 local shardGrabbed = false
 local finishPulse = 0
+local boardCenterX, boardCenterY = ScrW()*0.5, ScrH()*0.5
+local finishOffX, finishOffY = 340, -220  -- relative to board center (top-right)
+local trayW, trayH = 96, 72
 
--- Pain escalation only during minigame on failures per RU
 local function AddLocalPain(amount)
-    -- send to server to increment actual limb pain
     net.Start("WoundSystem_GlassPain")
         net.WriteFloat(amount)
         net.WriteString(activeLimb or "hand_R")
     net.SendToServer()
-    -- local pain shake intensifies
-    local shake = math.min(0.6, 0.08 + failCount * 0.07)
-    if WoundSystem and WoundSystem.MinigameClip then
-        -- handled via painShake in draw
-    end
 end
 
 local function ResetShardPos()
-    -- place shard near bone center with small random offset like bone fragment
-    local r = 48
+    local r = 78
     shardX = math.Rand(-r, r)
     shardY = math.Rand(-r, r)
     shardGrabbed = false
 end
 
-local function CreateOverlay()
+local function GetTrayPos()
+    return boardCenterX + finishOffX, boardCenterY + finishOffY
+end
+
+local function GetShardScreenPos()
+    return boardCenterX + shardX, boardCenterY + shardY
+end
+
+local function DestroyOverlay()
     if IsValid(MG.overlay) then MG.overlay:Remove() end
+    MG.overlay = nil
+end
+
+function CloseGlass()
+    DestroyOverlay()
+    activeLimb = nil
+    holding = false
+    shardGrabbed = false
+    MG.active = false
+    MG.overlay = nil
+    hook.Remove("Think", "WoundSystem_GlassInput")
+    hook.Remove("OnScreenSizeChanged", "WoundSystem_GlassResize")
+    gui.EnableScreenClicker(false)
+end
+
+local function CreateOverlay()
+    DestroyOverlay()
+    boardCenterX, boardCenterY = ScrW()*0.5, ScrH()*0.5
     local pnl = vgui.Create("DPanel")
     pnl:SetSize(ScrW(), ScrH())
     pnl:SetPos(0,0)
@@ -130,134 +136,132 @@ local function CreateOverlay()
     pnl:SetPopupStayAtBack(false)
     pnl.Paint = function(self,w,h)
         local cfg = GetCfg()
-        local cx, cy = w/2 + cfg.CenterOffsetX, h/2 + cfg.CenterOffsetY
+        local cx, cy = w/2 + (cfg.CenterOffsetX or 0), h/2 + (cfg.CenterOffsetY or 0)
+        boardCenterX, boardCenterY = cx, cy
+        local trayX, trayY = GetTrayPos()
 
         -- dark backdrop
         surface.SetDrawColor(0,0,0,160)
         surface.DrawRect(0,0,w,h)
 
-        -- pain vignette grows with failCount
+        -- pain vignette
         if failCount>0 then
             local a = math.Clamp(failCount*18,0,110)
             surface.SetDrawColor(120, 20, 20, a)
             surface.DrawRect(0,0,w,h)
         end
 
-        -- clip for minigame area
-        local clipW, clipH = 900*cfg.Scale, 480*cfg.Scale
-        local clipX, clipY = cx - clipW/2, cy - clipH/2
-        -- bone base
-        surface.SetMaterial(matBoneBase)
-        surface.SetDrawColor(255,255,255,cfg.BoneBaseAlpha)
-        surface.DrawTexturedRectRotated(cx+cfg.BoneBaseOffsetX*cfg.Scale, cy+cfg.BoneBaseOffsetY*cfg.Scale, cfg.BoneBaseWidth*cfg.Scale, cfg.BoneBaseHeight*cfg.Scale, cfg.BoneBaseRotation)
-
-        -- ghost target
-        surface.SetMaterial(matBoneGhost)
-        surface.SetDrawColor(255,255,255,cfg.BoneGhostAlpha)
-        surface.DrawTexturedRectRotated(cx+cfg.BoneGhostOffsetX*cfg.Scale, cy+cfg.BoneGhostOffsetY*cfg.Scale, cfg.BoneGhostWidth*cfg.Scale, cfg.BoneGhostHeight*cfg.Scale, cfg.BoneGhostRotation)
-
-        -- moveable bone with shard
-        local boneX, boneY = cx, cy
-        if sim then
-            local hx, hy = sim:GetHandPos()
-            -- simple follow: bone follows hand slightly when grabbed
-            if shardGrabbed and holding then
-                shardX = shardX + (hx - boneX)*0.1
-                shardY = shardY + (hy - boneY)*0.1
-            end
+        -- board background (minigameShrapnel.png scaled)
+        if not matBackground:IsError() then
+            local bw, bh = 820*cfg.Scale, 520*cfg.Scale
+            surface.SetMaterial(matBackground)
+            surface.SetDrawColor(255,255,255,220)
+            surface.DrawTexturedRect(cx - bw*0.5, cy - bh*0.5 + 30*cfg.Scale, bw, bh)
+        else
+            surface.SetDrawColor(40,40,40,180)
+            surface.DrawRect(cx-420*cfg.Scale, cy-260*cfg.Scale, 840*cfg.Scale, 520*cfg.Scale)
         end
-        surface.SetMaterial(matBoneMove)
-        surface.SetDrawColor(255,255,255,cfg.BoneMoveAlpha)
-        surface.DrawTexturedRectRotated(boneX, boneY, cfg.BoneMoveWidth*cfg.Scale, cfg.BoneMoveHeight*cfg.Scale, 0)
 
-        -- shard itself (tweezers target)
-        local sx, sy = boneX + shardX*cfg.Scale, boneY + shardY*cfg.Scale
+        -- shard
+        local sx, sy = GetShardScreenPos()
+        -- if grabbed, shard follows hand
+        if shardGrabbed and holding then
+            -- lerp shard to hand
+            local lerp = 0.14
+            shardX = Lerp(lerp, shardX, (MG.handScreenX - cx))
+            shardY = Lerp(lerp, shardY, (MG.handScreenY - cy))
+            sx, sy = GetShardScreenPos()
+        end
+
+        -- tray
+        local pulse = CurTime() - finishPulse < 0.35
+        if shardGrabbed then
+            surface.SetDrawColor(pulse and 120 or 100, pulse and 255 or 100, pulse and 120 or 100, pulse and 150 or 90)
+            surface.DrawRect(trayX- trayW*0.5, trayY - trayH*0.5, trayW, trayH)
+            surface.SetDrawColor(200,200,200,180)
+            surface.DrawOutlinedRect(trayX- trayW*0.5, trayY - trayH*0.5, trayW, trayH)
+            if pulse then
+                surface.SetDrawColor(120,255,120,90)
+                surface.DrawRect(trayX- trayW*0.5, trayY - trayH*0.5, trayW, trayH)
+            end
+            draw.SimpleText("DROP HERE", "DefaultSmall", trayX, trayY+ trayH*0.5+10, Color(180,255,180,200), TEXT_ALIGN_CENTER)
+        end
+
+        -- shard sprite
         surface.SetMaterial(matShard)
         if shardGrabbed then
             surface.SetDrawColor(200,255,200,255)
         else
-            surface.SetDrawColor(180,220,255,235)
+            surface.SetDrawColor(185,225,255,250)
         end
-        local sw, sh = 68*cfg.Scale, 48*cfg.Scale
-        -- pulse if near finish
-        local distToFinish = math.sqrt((sx-FINISH_X)^2 + (sy-FINISH_Y)^2)
-        if shardGrabbed then
-            -- draw tray at finish
-            surface.SetDrawColor(100,100,100,90)
-            surface.DrawRect(FINISH_X-44, FINISH_Y-34, 88, 68)
-            surface.SetDrawColor(200,200,200,180)
-            surface.DrawOutlinedRect(FINISH_X-44, FINISH_Y-34, 88, 68)
-            if CurTime() - finishPulse < 0.3 then
-                surface.SetDrawColor(120,255,120,140)
-                surface.DrawRect(FINISH_X-44, FINISH_Y-34, 88, 68)
-            end
-        end
-        surface.DrawTexturedRectRotated(sx, sy, sw, sh, shardGrabbed and (CurTime()*45 %360) or 0)
+        local sw, sh = 54*cfg.Scale, 112*cfg.Scale
+        -- draw shard with slight rotation when grabbed
+        local ang = shardGrabbed and (CurTime()*70 % 360) or 18
+        surface.DrawTexturedRectRotated(sx, sy, sw, sh, ang)
 
-        -- hand / tweezers (reuse hand mats as tweezers placeholder per keep png)
-        if sim then
-            local hx, hy = sim:GetHandPos()
-            local mat = holding and matHandClick or matHandIdle
-            surface.SetMaterial(mat)
-            surface.SetDrawColor(255,255,255,cfg.HandAlpha)
-            -- pain shake
-            local shakeX = math.sin(CurTime()*18) * math.min(failCount*2.2, 14)
-            local shakeY = math.cos(CurTime()*14) * math.min(failCount*1.2, 8)
-            hx = hx + shakeX
-            hy = hy + shakeY
-            surface.DrawTexturedRectRotated(hx, hy, cfg.HandWidth*cfg.HandScale*0.11, cfg.HandHeight*cfg.HandScale*0.11, 0)
+        -- hand / tweezers
+        do
+            local handMat = holding and matTweezersClick or matTweezersIdle
+            if handMat:IsError() then handMat = holding and matHandClick or matHandIdle end
+            surface.SetMaterial(handMat)
+            -- pain shake on hand
+            local shakeX = math.sin(CurTime()*17) * math.min(failCount*2.4, 16)
+            local shakeY = math.cos(CurTime()*13) * math.min(failCount*1.3, 9)
+            local hx = MG.handScreenX + shakeX
+            local hy = MG.handScreenY + shakeY
+            local hw, hh = 420*cfg.Scale*0.34*cfg.HandScale, 820*cfg.Scale*0.34*cfg.HandScale
+            -- rotate slightly with velocity
+            local angHand = (MG.handScreenVelX or 0)*0.18
+            surface.SetDrawColor(255,255,255,255)
+            surface.DrawTexturedRectRotated(hx, hy, hw, hh, angHand)
         end
 
         -- instructions
-        draw.SimpleText("GLASS SHARD EXTRACTION - "..(activeLimb or "?"), "DermaLarge", cx, 64, Color(255,255,255,255), TEXT_ALIGN_CENTER)
-        draw.SimpleText(shardGrabbed and "Drag shard to tray (top-right) and click!" or "Grab glass shard with tweezers (hold LMB)", "Default", cx, 96, Color(210,230,255,255), TEXT_ALIGN_CENTER)
+        draw.SimpleText("GLASS SHARD EXTRACTION - " .. (activeLimb or "?"), "DermaLarge", cx, 64, Color(255,255,255,255), TEXT_ALIGN_CENTER)
+        draw.SimpleText(shardGrabbed and "Drag shard to tray (top-right) and release!" or "Click and hold to grab glass shard with tweezers", "Default", cx, 96, Color(210,230,255,255), TEXT_ALIGN_CENTER)
         if failCount>0 then
-            draw.SimpleText("Pain: "..failCount.." mistakes - further errors cause unconsciousness", "Default", cx, h-48, Color(255,120,120,255), TEXT_ALIGN_CENTER)
+            draw.SimpleText("Mistakes: "..failCount.." - further errors cause fainting", "Default", cx, h-48, Color(255,120,120,255), TEXT_ALIGN_CENTER)
         end
         draw.SimpleText("ESC to close", "Default", w-84, 16, Color(200,200,200,200), TEXT_ALIGN_CENTER)
     end
+
     pnl.OnMousePressed = function(self, code)
         if code == MOUSE_LEFT then
             holding = true
-            -- check if near shard
-            if not shardGrabbed and sim then
-                local hx, hy = sim:GetHandPos()
-                local cfg2 = GetCfg()
-                local cx2, cy2 = w/2+cfg2.CenterOffsetX, h/2+cfg2.CenterOffsetY
-                local sx, sy = cx2 + shardX*cfg2.Scale, cy2 + shardY*cfg2.Scale
-                local dist = math.sqrt((hx-sx)^2 + (hy-sy)^2)
-                if dist < 52*cfg2.Scale then
+            local cfg = GetCfg()
+            local cx, cy = self:GetWide()/2 + (cfg.CenterOffsetX or 0), self:GetTall()/2 + (cfg.CenterOffsetY or 0)
+            local sx, sy = GetShardScreenPos()
+            local mx, my = gui.MousePos()
+            -- also consider hand pos for hit
+            local hx, hy = MG.handScreenX, MG.handScreenY
+            local distMouse = math.sqrt((mx - sx)^2 + (my - sy)^2)
+            local distHand = math.sqrt((hx - sx)^2 + (hy - sy)^2)
+            local dist = math.min(distMouse, distHand)
+            local grabRadius = 62*cfg.Scale
+            if not shardGrabbed then
+                if dist < grabRadius then
                     shardGrabbed = true
-                    surface.PlaySound("physics/flesh/flesh_impact_hard"..math.random(1,5)..".wav")
+                    surface.PlaySound("physics/flesh/flesh_impact_hard1.wav")
                 else
-                    -- miss near shard => pain
-                    local missThresh = 110*cfg2.Scale
-                    if dist < missThresh then
+                    -- miss close to shard => pain
+                    if dist < 120*cfg.Scale then
                         failCount = failCount+1
                         AddLocalPain(math.Rand(6,11))
                         surface.PlaySound("physics/body/body_medium_impact_soft"..math.random(3,7)..".wav")
                         if failCount >= 6 then
-                            -- too many mistakes => faint
                             net.Start("WoundSystem_GlassFaint")
                                 net.WriteString(activeLimb or "hand_R")
                             net.SendToServer()
                         end
                     end
                 end
-            elseif shardGrabbed then
-                -- check drop at finish
-                local hx, hy = sim and sim:GetHandPos() or Vector(0,0)
-                -- hx/hy are 2d, use stored
-                -- Instead get mouse pos
-                local mx, my = gui.MousePos()
-                local distF = math.sqrt((mx-FINISH_X)^2 + (my-FINISH_Y)^2)
-                -- also check hand pos proximity
-                if sim then
-                    local hx2, hy2 = sim:GetHandPos()
-                    distF = math.min(distF, math.sqrt((hx2-FINISH_X)^2 + (hy2-FINISH_Y)^2))
-                end
-                if distF < 64 then
-                    -- success
+            else
+                -- already grabbed, check drop at tray
+                local trayX, trayY = GetTrayPos()
+                local distTrayMouse = math.sqrt((mx - trayX)^2 + (my - trayY)^2)
+                local distTrayHand = math.sqrt((hx - trayX)^2 + (hy - trayY)^2)
+                local distF = math.min(distTrayMouse, distTrayHand)
+                if distF < math.max(trayW, trayH)*0.7 then
                     finishPulse = CurTime()
                     surface.PlaySound("physics/flesh/flesh_impact_hard6.wav")
                     net.Start("WoundSystem_GlassSuccess")
@@ -265,7 +269,7 @@ local function CreateOverlay()
                     net.SendToServer()
                     CloseGlass()
                 else
-                    -- dropped shard mid-way = fail
+                    -- dropped wrong place
                     failCount = failCount+1
                     AddLocalPain(math.Rand(8,13))
                     shardGrabbed = false
@@ -273,57 +277,58 @@ local function CreateOverlay()
                     surface.PlaySound("physics/body/body_medium_impact_soft"..math.random(1,7)..".wav")
                 end
             end
+        elseif code == MOUSE_RIGHT and shardGrabbed then
+            -- right click to release back
+            shardGrabbed = false
+            ResetShardPos()
         end
     end
     pnl.OnMouseReleased = function(self, code)
         if code == MOUSE_LEFT then
-            if shardGrabbed then
-                -- if released not at tray, count as drop/fail if far
-                local mx, my = gui.MousePos()
-                local distF = math.sqrt((mx-FINISH_X)^2 + (my-FINISH_Y)^2)
-                if distF > 90 then
-                    -- allow holding via drag? if released away from tray, drop
-                    -- we keep grabbed until they click tray, so ignore release
-                end
-            end
             holding = false
+            -- if grabbed, keep grabbed until they click tray (don't drop on release)
         end
     end
     MG.overlay = pnl
 end
 
-function CloseGlass()
-    if IsValid(MG.overlay) then MG.overlay:Remove() end
-    MG.overlay = nil
-    activeLimb = nil
-    holding = false
-    shardGrabbed = false
-    hook.Remove("Think", "WoundSystem_GlassInput")
-    hook.Remove("OnScreenSizeChanged", "WoundSystem_GlassResize")
-    gui.EnableScreenClicker(false)
-end
-
 function OpenGlass(limbId)
     activeLimb = limbId or "hand_R"
     failCount = 0
-    startTime = CurTime()
-    -- init hand physics sim
-    if HandPhysics then
-        sim = HandPhysics.New()
-        if sim and sim.SetCenter then sim:SetCenter(ScrW()/2, ScrH()/2) end
-    end
+    MG.active = true
+    MG.limbId = activeLimb
+    MG.failCount = 0
+    MG.openTime = CurTime()
+    MG.handScreenX = ScrW()*0.5
+    MG.handScreenY = ScrH()*0.5
+    MG.handScreenVelX = 0
+    MG.handScreenVelY = 0
+    MG._hp_acc = 0
     ResetShardPos()
     CreateOverlay()
     gui.EnableScreenClicker(true)
 
     hook.Add("Think", "WoundSystem_GlassInput", function()
         if not IsValid(MG.overlay) then return end
-        if sim and sim.Update then
+        local dt = RealFrameTime()
+        -- update hand via shared physics with pain shake
+        if HandPhysics and HandPhysics.Step then
+            local painFactor = math.Clamp(failCount*0.14, 0, 1)
+            HandPhysics.Step(MG, dt, {
+                pain = painFactor,
+                str = 2,
+                conc = 100,
+                shakeX = 90,
+                shakeY = 36,
+                maxLength = 75,
+                responsiveness = 7,
+            })
+        else
             local mx, my = gui.MousePos()
-            sim:Update(mx, my, holding)
+            MG.handScreenX = Lerp(0.18, MG.handScreenX, mx)
+            MG.handScreenY = Lerp(0.18, MG.handScreenY, my)
         end
-        if input.IsKeyDown(KEY_ESCAPE) then
-            -- pain on abort? small
+        if input.IsKeyDown(KEY_ESCAPE) and CurTime() - MG.openTime > 0.4 then
             CloseGlass()
         end
     end)
@@ -331,6 +336,7 @@ function OpenGlass(limbId)
         if IsValid(MG.overlay) then
             MG.overlay:SetSize(ScrW(), ScrH())
         end
+        boardCenterX, boardCenterY = ScrW()*0.5, ScrH()*0.5
     end)
 end
 
@@ -343,13 +349,11 @@ end)
 -- console command for radial menu
 concommand.Add("woundsys_glass_extract", function(ply, cmd, args)
     local limb = args[1] or activeLimb or "hand_R"
-    -- request server to allow glass extraction minigame if limb has shard
     net.Start("WoundSystem_GlassRequest")
         net.WriteString(limb)
     net.SendToServer()
 end)
 
--- also support hg style command
 concommand.Add("hg_extract_glass", function(_,_,args)
     RunConsoleCommand("woundsys_glass_extract", args[1] or "hand_R")
 end)
