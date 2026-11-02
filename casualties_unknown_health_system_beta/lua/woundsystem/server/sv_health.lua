@@ -4075,6 +4075,7 @@ local function CopyLimbSnapshot(state)
         eyes = state.eyes or 2,
         dismembered = state.dismembered or false,
         bandageMinigameSpeedMult = state.bandageMinigameSpeedMult or 1,
+        shrapnel = state.shrapnel or 0,
         statusSnapshot = WoundSystem.Statuses and WoundSystem.Statuses.GetSnapshot(state) or ""
     }
 end
@@ -4191,6 +4192,7 @@ SendLimbUpdate = function(ply, limb, force)
         net.WriteUInt(state.eyes or 2, 3)
         net.WriteBool(state.dismembered or false)
         net.WriteFloat(state.bandageMinigameSpeedMult or 1)
+        net.WriteUInt(state.shrapnel or 0, 4)
         if WoundSystem.Statuses and WoundSystem.Statuses.WriteNet then
             WoundSystem.Statuses.WriteNet(state)
         else

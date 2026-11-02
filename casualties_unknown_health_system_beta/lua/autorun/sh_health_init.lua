@@ -40,6 +40,7 @@ local clientFiles = {
     "woundsystem/client/minigames/minigame_dev_config.lua",
     "woundsystem/client/minigames/cl_dislocation.lua",
     "woundsystem/client/minigames/cl_glass.lua",
+    "woundsystem/client/minigames/cl_shrapnel.lua",
     "woundsystem/client/minigames/cl_bandage.lua",
     "woundsystem/client/minigames/cl_syringe.lua",
     "woundsystem/client/minigames/cl_aed.lua",

@@ -1397,6 +1397,7 @@ local defaultLimbState = {
     boneHealTimer = 0,
     temperature = 37,
     oxygen = 100,
+    shrapnel = 0,
     stress = 0,
     isBandaged = false,
     dismembered = false,
@@ -2160,8 +2161,9 @@ net.Receive("WoundSystem_UpdateLimb", function()
 	state.hasInjection = net.ReadBool()
     state.furBloodAmount = net.ReadFloat()
 	state.eyes = net.ReadUInt(3)
-	state.dismembered = net.ReadBool()
+    state.dismembered = net.ReadBool()
     state.bandageMinigameSpeedMult = net.ReadFloat()
+    state.shrapnel = net.ReadUInt(4)
     if WoundSystem.Statuses and WoundSystem.Statuses.ReadNet then
         WoundSystem.Statuses.ReadNet(state)
     else
