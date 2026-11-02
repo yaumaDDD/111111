@@ -733,20 +733,16 @@ function WB.RelievePersistentPain(ply, amount)
 	return true
 end
 
---- Growing pain from glass shards -> standard WoundSystem shock / unconscious ragdoll
+--- Pain from glass shards only grows on mistakes made INSIDE the minigame; repeated
+--- failures build it up -> standard WoundSystem shock / unconscious ragdoll
 --- (TryCreateUnconsciousRagdoll already goes through Z-City's hg.Fake).
 function WB.TickPersistentPain(ply, body, dt)
 	local limbs = WB.GetLimbs(ply)
 	if not limbs or not body then return end
 	local H = Health()
 
-	local glass = WB.GlassShards[ply]
-	if glass then
-		for limbId, count in pairs(glass) do
-			if count > 0 then WB.AddPersistentPain(ply, limbId, count * 0.9 * (dt or 0)) end
-		end
-	end
-
+	-- NO passive pain over time: pain only grows INSIDE the glass minigame,
+	-- from the player's own mistakes (see BreakGlassGrasp / reimpale below).
 	local t = ply._WBPersistentPain
 	if not t then return end
 
@@ -1522,6 +1518,7 @@ local GLASS = {
 	GrabHalfX = 75,
 	GrabHalfY = 350,
 	InputDelay = 0.05,
+	ReimpalePain = 8,
 	BasePos = {
 		{ x = -86, y = -214 },
 		{ x = -44, y = -214 },
@@ -1582,9 +1579,9 @@ function WB.SetGlass(ply, limbId, count)
 end
 
 function WB.ClearGlass(ply)
-	GlassShards[ply] = nil
 	local session = Sessions[ply]
 	if session then CloseGlassSession(ply, "cleared") end
+	GlassShards[ply] = nil
 	WB.SendGlassStatus(ply)
 end
 
@@ -1599,7 +1596,7 @@ end
 local function CountRemaining(session)
 	local count = 0
 	for _, piece in ipairs(session.pieces) do
-		if piece.active and piece.embedded ~= false then count = count + 1 end
+		if piece.active and not piece.removed then count = count + 1 end
 	end
 	return count
 end
@@ -1693,6 +1690,9 @@ function CloseGlassSession(ply, reason)
 	if not session then return end
 	Sessions[ply] = nil
 
+	-- glass never disappears until it was actually pulled out and released
+	WB.SetGlass(ply, session.limbId, CountRemaining(session))
+
 	net.Start("WoundSystem_ShrapnelClose")
 		net.WriteUInt(session.id, 24)
 		net.WriteString(reason or "closed")
@@ -1747,6 +1747,14 @@ end
 -- glass-pulling physics
 -----------------------------------------------------------------------------------------------------------------------
 
+--- One "mistake" = one pain step, not one network packet.
+local function AddGlassMistakePain(ply, session, amount)
+	if (session.lastMistakeAt or 0) > CurTime() then return false end
+	session.lastMistakeAt = CurTime() + 0.45
+	WB.AddPersistentPain(ply, session.limbId, amount)
+	return true
+end
+
 local function BreakGlassGrasp(ply, session)
 	session.heldIndex = nil
 	session.grabArmed = false
@@ -1759,6 +1767,8 @@ local function BreakGlassGrasp(ply, session)
 	state.skin = Clamp((state.skin or 100) - Rand(4, 6), 0, 100)
 	state.bleed = Clamp((state.bleed or 0) + Rand(0.4, 1.0), 0, 100)
 	state.pain = Clamp((state.pain or 0) + Rand(9, 16), 0, 100)
+	-- a failed pull hurts and the pain stays (only a Z-City painkiller removes it)
+	AddGlassMistakePain(ply, session, Rand(9, 16))
 	if H.Fn and H.Fn.ClearLimbBandage then H.Fn.ClearLimbBandage(state) end
 	if H.SendLimbUpdate then H.SendLimbUpdate(ply, session.limbId, true) end
 end
@@ -1900,7 +1910,10 @@ net.Receive("WoundSystem_ShrapnelInput", function(_, ply)
 			heldPiece.x = Lerp(GLASS.DragSmooth, heldPiece.x, targetX)
 			heldPiece.y = Lerp(GLASS.DragSmooth, heldPiece.y, targetY)
 			heldPiece.y = Clamp(heldPiece.y, GLASS.MinY, GLASS.FreeMaxY)
-			if heldPiece.y <= GLASS.ReimpaleY then heldPiece.embedded = true end
+			if heldPiece.y <= GLASS.ReimpaleY then
+				heldPiece.embedded = true
+				AddGlassMistakePain(ply, session, GLASS.ReimpalePain)
+			end
 		else
 			heldPiece.y = Lerp(GLASS.DragSmooth, heldPiece.y, targetY)
 			heldPiece.y = Clamp(heldPiece.y, GLASS.MinY, GLASS.ExtractY)
@@ -1922,6 +1935,12 @@ net.Receive("WoundSystem_ShrapnelInput", function(_, ply)
 	end
 
 	if shouldRelease then
+		-- the shard leaves the body ONLY when a fully pulled-out shard is released
+		local released = session.heldIndex and session.pieces[session.heldIndex]
+		if released and released.active and released.embedded == false then
+			released.removed = true
+			released.active = false
+		end
 		session.heldIndex = nil
 		session.grabArmed = false
 		session.holdSource = nil
@@ -1947,9 +1966,9 @@ end)
 -----------------------------------------------------------------------------------------------------------------------
 
 hook.Add("PlayerSpawn", "WoundBridge_GlassSpawn", function(ply)
+	CloseGlassSession(ply, "respawn") -- syncs the leftover shards first
 	GlassShards[ply] = nil
 	WB.ClearPersistentPain(ply)
-	CloseGlassSession(ply, "respawn")
 	WB.SendGlassStatus(ply)
 end)
 
