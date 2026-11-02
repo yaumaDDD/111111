@@ -229,6 +229,11 @@ function WB.SurfaceCut(ply, limbId, force, surface)
 	if not l or l.dismembered then return false end
 
 	local jump = (body and body.jumpSpeed) or 6.5
+	-- RU: в рагдолле не создаём осколков в теле (thorax/abdomen/head) — только конечности
+	local isRagdollGlass = IsValid(ply.FakeRagdoll) and surface and glassCutSurfaces[surface]
+	if isRagdollGlass and (limbId == "thorax" or limbId == "abdomen" or limbId == "head") then
+		return false
+	end
 	-- RU: glass shards on any glass contact even light bump: embed shrapnel even at low force (reaction only on glass, even in ragdoll)
 	if surface and glassCutSurfaces[surface] then
 		if force > jump * 0.35 then

@@ -6,6 +6,8 @@ pcall(function() util.AddNetworkString("WoundSystem_RadialHealOther") end)
 pcall(function() util.AddNetworkString("WoundSystem_GlassRequestOther") end)
 pcall(function() util.AddNetworkString("WoundSystem_HudBandage") end)
 pcall(function() util.AddNetworkString("WoundSystem_GlassHandExtract") end)
+pcall(function() util.AddNetworkString("WoundSystem_TourniquetFromInv") end)
+pcall(function() util.AddNetworkString("WoundSystem_BandageFromInv") end)
 
 local BANDAGE_MAP = {
     weapon_bandage_sh = {item="GAUZE", durNeed=8},
@@ -184,6 +186,79 @@ net.Receive("WoundSystem_GlassRequestOther", function(len, ply)
     end
     ply:Notify("Pulled glass from "..target:Nick().." "..limbId.." by hands",1,"glass_done_other",1,nil,Color(120,255,120,255))
     target:Notify(ply:Nick().." pulled glass from "..limbId,1,"glass_done_target",1,nil,Color(120,255,120,255))
+end)
+
+-- Inv-window tourniquet (жгут): из ZCity инвентаря — отдельный mg, лечит артериальное
+local function TryTourniquetFromInv(ply, target, limbId)
+    if not IsValid(ply) or not IsValid(target) then return false end
+    if ply:GetPos():DistToSqr(target:GetPos()) > 250*250 and ply~=target then ply:Notify("Too far for tourniquet",1,"tour_far",1,nil,Color(255,180,120,255)) return false end
+    local swep = ply:GetActiveWeapon()
+    if not IsValid(swep) or swep:GetClass() ~= "weapon_tourniquet" then
+        -- ищем в руках любой жгут в оружии; если нет активного — ищем в GetWeapons
+        for _,w in ipairs(ply:GetWeapons() or {}) do if w:GetClass()=="weapon_tourniquet" then swep=w break end end
+    end
+    if not IsValid(swep) or swep:GetClass()~="weapon_tourniquet" then ply:Notify("Need tourniquet in inventory (ZCity selector)",1,"tour_noitem",1,nil,Color(255,150,150,255)) return false end
+    local H = WoundSystem and WoundSystem.Health
+    local limbs = H and H.PlayerLimbs and H.PlayerLimbs[target]
+    local st = limbs and limbs[limbId]
+    if not st or st.dismembered then ply:Notify("Invalid limb",1,"tour_inv",1,nil,Color(255,150,150,255)) return false end
+    local allowed = {arm_R=true,forearm_R=true,hand_R=true,arm_L=true,forearm_L=true,hand_L=true,thigh_R=true,crus_R=true,foot_R=true,thigh_L=true,crus_L=true,foot_L=true}
+    if not allowed[limbId] then ply:Notify("Tourniquet only on limbs",1,"tour_limb",1,nil,Color(255,150,150,255)) return false end
+    if st.tourniqueted or st.blockedBleeding then ply:Notify(limbId.." already has tourniquet",1,"tour_has",1,nil,Color(180,220,255,255)) return false end
+    if (st.bleed or 0) < 5 and not st.arterialBleed and not (st.customStatuses and st.customStatuses["ARTERIAL_BLEED"]) then ply:Notify("No severe bleeding/arterial to need tourniquet",1,"tour_nobleed",1,nil,Color(180,220,255,255)) return false end
+    -- отдельный mg для жгута (привязан к зсити свепам — weapon_tourniquet)
+    if H.StartExternalMinigame and H.HasExternalMinigame and not H.HasExternalMinigame(ply) and hg and hg.WoundBridge and hg.WoundBridge.cvMinigame and hg.WoundBridge.cvMinigame:GetBool() then
+        local itemId="TOURNIQUET"
+        local maxDur = (WoundSystem.Items and WoundSystem.Items.GetMax and WoundSystem.Items.GetMax(itemId)) or 100
+        local def = (swep.modeValuesdef and swep.modeValuesdef[1] and (istable(swep.modeValuesdef[1]) and swep.modeValuesdef[1][1] or swep.modeValuesdef[1])) or 40
+        local remaining = (swep.modeValues and swep.modeValues[1]) or 0
+        local amount = remaining / math.max(def,0.001) * maxDur
+        if amount<=0.1 then ply:Notify("Tourniquet empty",1,"tour_empty",1,nil,Color(255,150,150,255)) return false end
+        local started = H.StartExternalMinigame(ply, {kind="tourniquet", itemId=itemId, limbId=limbId, amount=amount,
+            onProgress=function(p,session,durCost)
+                if not IsValid(swep) or not IsValid(target) then return end
+                local ok = H.ApplyItemToBody(target,itemId,limbId,durCost)
+                if ok and swep.modeValues then
+                    local def2 = def
+                    local consume = durCost / math.max(maxDur,1) * def2
+                    swep.modeValues[1]=math.max((swep.modeValues[1] or 0)-consume,0)
+                end
+            end})
+        if started then return true end
+    end
+    local ok,used = H.ApplyItemToBody(target,"TOURNIQUET",limbId,12.5)
+    if not ok then ply:Notify("Tourniquet failed",1,"tour_fail",1,nil,Color(255,150,150,255)) return false end
+    local def = (swep.modeValuesdef and swep.modeValuesdef[1] and (istable(swep.modeValuesdef[1]) and swep.modeValuesdef[1][1] or swep.modeValuesdef[1])) or 40
+    if swep.modeValues then swep.modeValues[1]=math.max((swep.modeValues[1] or 0) - (used or 12.5)/100*def,0) end
+    ply:Notify("Tourniquet on "..target:Nick().." "..limbId.." — arterial bleed blocked",1,"tour_ok",1,nil,Color(180,255,180,255))
+    if target~=ply then target:Notify(ply:Nick().." applied tourniquet on "..limbId,1,"tour_tgt",1,nil,Color(180,255,180,255)) end
+    return true
+end
+
+net.Receive("WoundSystem_TourniquetFromInv", function(len, ply)
+    if not IsValid(ply) or not ply:Alive() then return end
+    local limbId = net.ReadString()
+    if not limbId or limbId=="" then return end
+    local target = ply
+    if hg and hg.eyeTrace then
+        local tr = hg.eyeTrace(ply)
+        if IsValid(tr.Entity) then
+            local tp = hg.RagdollOwner and hg.RagdollOwner(tr.Entity) or (tr.Entity:IsPlayer() and tr.Entity or nil)
+            if IsValid(tp) and tp~=ply and tp:Alive() and ply:GetPos():DistToSqr(tp:GetPos())<250*250 then target=tp end
+        end
+    end
+    TryTourniquetFromInv(ply,target,limbId)
+end)
+net.Receive("WoundSystem_BandageFromInv", function(len, ply)
+    if not IsValid(ply) or not ply:Alive() then return end
+    local limbId = net.ReadString()
+    local cls = net.ReadString() -- ZCity swep class e.g. weapon_bandage_sh
+    if not limbId or limbId=="" then return end
+    -- select that swep if owned then reuse TryBandage
+    if ply.GetWeapons then for _,w in ipairs(ply:GetWeapons()) do if w:GetClass()==cls then ply:SelectWeapon(cls) break end end end
+    local target = ply
+    if hg and hg.eyeTrace then local tr=hg.eyeTrace(ply) if IsValid(tr.Entity) then local tp=hg.RagdollOwner and hg.RagdollOwner(tr.Entity) or (tr.Entity:IsPlayer() and tr.Entity or nil) if IsValid(tp) and tp~=ply and tp:Alive() and ply:GetPos():DistToSqr(tp:GetPos())<250*250 then target=tp end end end
+    TryBandage(ply,target,limbId)
 end)
 
 -- Glass extract complete - handled via direct hand extraction, no minigame override needed

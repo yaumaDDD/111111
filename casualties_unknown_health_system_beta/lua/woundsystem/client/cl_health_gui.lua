@@ -3830,17 +3830,101 @@ function WoundSystemDrawLimbActionPoint(limbId, state, pointPos, bX, bY, scale, 
         WoundSystemQueueDirectTooltip("action_" .. actionStatus, tipTitle, tipDesc, 35)
     end
 
-    if hoveringPoint and isClicking and not GUIState.lastMouseState and not minigameActive then
-        if actionStatus == "DISLOCATION" then
-            RequestDislocationMinigameStart(limbId)
-        elseif actionStatus == "GLASS_SHARD" then
-            RequestGlassHandExtract(limbId)
-        elseif actionStatus == "BANDAGE" then
-            RequestHudBandage(limbId)
-        else
-            RequestRemoveLimbStatus(limbId, actionStatus)
+    -- RU: приоритет игры в меню — клик ловится первым, без задержки lastMouseState, даже если другой UI перекрывает
+    if hoveringPoint and isClicking and not minigameActive then
+        if not GUIState.actionPointConsumed then
+            GUIState.actionPointConsumed = true
+            if actionStatus == "DISLOCATION" then
+                RequestDislocationMinigameStart(limbId)
+            elseif actionStatus == "GLASS_SHARD" then
+                RequestGlassHandExtract(limbId)
+            elseif actionStatus == "BANDAGE" then
+                RequestHudBandage(limbId)
+            else
+                RequestRemoveLimbStatus(limbId, actionStatus)
+            end
+            return
         end
     end
+end
+
+-- RU: маленький инвентарь из стандартного селектора оружия ZCity — показывает мед-предметы игрока
+local ZCityMedicalClasses = {
+    ["weapon_bandage_sh"] = {item="GAUZE", title="Бинт", icon="casunknown-images/items/bandage.png"},
+    ["weapon_bigbandage_sh"] = {item="STERILIZEDBANDAGE", title="Б.Бинт", icon="casunknown-images/items/bigbandage.png"},
+    ["weapon_tourniquet"] = {item="TOURNIQUET", title="Жгут", icon="casunknown-images/items/tourniquet.png"},
+    ["weapon_morphine"] = {item="MORPHINE", title="Морфин", icon="casunknown-images/items/morphine.png"},
+    ["weapon_betablock"] = {item="BLOODCOAGULANT", title="Коагулянт", icon="casunknown-images/items/bandage.png"},
+    ["weapon_bloodbag"] = {item="BLOOD BAG", title="Кровь", icon="casunknown-images/items/bloodbag.png"},
+    ["weapon_splint"] = {item="SPLINT", title="Шина", icon="casunknown-images/items/splint.png"},
+}
+local function GetZCityMedicalInventory()
+    local ply = LocalPlayer()
+    if not IsValid(ply) then return {} end
+    local out = {}
+    for _, wep in ipairs(ply:GetWeapons() or {}) do
+        if not IsValid(wep) then continue end
+        local cls = wep:GetClass()
+        local def = ZCityMedicalClasses[cls]
+        if def then
+            table.insert(out, {class=cls, wep=wep, def=def})
+        end
+    end
+    -- also check ZCity netvar Inventory if present (hg.Inventory)
+    if hg and hg.Inventory and hg.Inventory.Get then
+        -- fallback, not critical
+    end
+    return out
+end
+
+local function DrawMedicalInventoryWindow(bX, bY, scale, mx, my, isClicking, selectedLimbId, selectedState)
+    local inv = GetZCityMedicalInventory()
+    if #inv == 0 then return end
+    -- filter by suitability: бинт только если bleed, жгут если arterial, etc.
+    local hasArterial = selectedState and (selectedState.arterialBleed or (selectedState.customStatuses and selectedState.customStatuses["ARTERIAL_BLEED"]))
+    local filtered = {}
+    for _, entry in ipairs(inv) do
+        if entry.def.item == "GAUZE" or entry.def.item == "STERILIZEDBANDAGE" then
+            if (selectedState and (selectedState.bleed or 0) > 0.05) then table.insert(filtered, entry) end
+        elseif entry.def.item == "TOURNIQUET" then
+            if hasArterial or (selectedState and (selectedState.bleed or 0) > 0.5) then table.insert(filtered, entry) end
+        else
+            table.insert(filtered, entry)
+        end
+    end
+    if #filtered == 0 then return end
+    local winW, winH = 190*scale, (24 + #filtered*22)*scale
+    local winX, winY = bX + 260*scale, bY + 360*scale
+    surface.SetDrawColor(18,18,20,220)
+    surface.DrawRect(winX, winY, winW, winH)
+    surface.SetDrawColor(86,221,132,180)
+    surface.DrawOutlinedRect(winX, winY, winW, winH)
+    draw.SimpleText("Инвентарь ZCity:", "RetroTooltipDesc", winX+6*scale, winY+4*scale, Color(86,221,132))
+    for i, entry in ipairs(filtered) do
+        local rowY = winY + 18*scale + (i-1)*22*scale
+        local hov = mx >= winX and mx <= winX+winW and my >= rowY and my <= rowY+20*scale
+        if hov then surface.SetDrawColor(86,221,132,40) surface.DrawRect(winX+2*scale, rowY, winW-4*scale, 20*scale) end
+        draw.SimpleText(entry.def.title, "RetroTooltipDesc", winX+8*scale, rowY+2*scale, hov and Color(255,255,255) or Color(200,200,200))
+        if hov and isClicking and not GUIState.lastMouseState and not GUIState.actionPointConsumed then
+            -- приоритет инвентаря после ActionPoint, но перед закрытием HUD — RU: игру не может нажать фиксим consumed
+            if entry.class == "weapon_tourniquet" then
+                RequestApplyTourniquetFromInventory(selectedLimbId)
+            elseif entry.def.item == "GAUZE" or entry.def.item == "STERILIZEDBANDAGE" then
+                RequestHudBandage(selectedLimbId)
+            else
+                -- fallback: select weapon then let ZCity swep heal handle
+                RunConsoleCommand("use", entry.class)
+            end
+        end
+    end
+end
+
+-- helper for tourniquet from inventory window
+function RequestApplyTourniquetFromInventory(limbId)
+    if not limbId then return end
+    net.Start("WoundSystem_TourniquetFromInv")
+        net.WriteString(limbId)
+    net.SendToServer()
 end
 
 hook.Add("HUDPaint", "WoundDollAndPanel", function()
@@ -3876,6 +3960,8 @@ hook.Add("HUDPaint", "WoundDollAndPanel", function()
     local isMiddleClicking = input.IsMouseDown(MOUSE_MIDDLE)
     local minigameActive = WoundSystemIsAnyWoundMinigameActive()
     local hoveredLimbId = nil
+    GUIState.actionPointConsumed = false
+    GUIState.actionPointHovered = false
 
     WoundSystemResetTooltipQueue()
     
@@ -4665,11 +4751,13 @@ hook.Add("HUDPaint", "WoundDollAndPanel", function()
                 end
 
                 WoundSystemDrawLimbActionPoint(GUIState.selectedLimbData.id, s, limbScreenPoints[GUIState.selectedLimbData.id], bX, bY, scale, dollScale, mx, my, isClicking, GUIState.lastMouseState, minigameActive)
+                -- RU: маленький инвентарь из селектора ZCity — маленький окошко выбора бинта/жгута
+                DrawMedicalInventoryWindow(bX, bY, scale, mx, my, isClicking, GUIState.selectedLimbData.id, s)
             end
         
         render.SetScissorRect(0, 0, 0, 0, false)
         
-        -- (the WoundSystem inventory panel was removed: items are the Z-City SWEPs)
+        -- (the WoundSystem inventory panel was removed: items are the Z-City SWEPs) — RU: заменён на DrawMedicalInventoryWindow выше
     end
     end -- close dead-wrapper: end _orig_panel  if false + do
     end -- close dead-wrapper: if false (left panel)

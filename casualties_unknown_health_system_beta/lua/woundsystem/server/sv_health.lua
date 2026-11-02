@@ -6065,6 +6065,10 @@ WoundSystem.Health.HandleDamage = function(ent, dmginfo)
                     state.bleed = math.Clamp(state.bleed + (isHighCaliber and vesselBleed * 1.8 or vesselBleed), 0, 100)
                     state.pain  = math.Clamp(state.pain  + (dmg * 0.5), 0, 100)
                     Fn.ClearLimbBandage(state)
+                    -- RU: артериальное — нужен жгут (бинт почти не помогает), вешаем статус ARTERIAL_BLEED
+                    state.arterialBleed = true
+                    state.customStatuses = state.customStatuses or {}
+                    state.customStatuses["ARTERIAL_BLEED"] = true
                 end
             end
 

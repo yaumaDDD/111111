@@ -122,6 +122,21 @@ WoundSystem.Items.Register("TOURNIQUET", {
                 ctx.limb.tourniquetDurability = attachedDurability
                 ctx.limb.tourniquetSourceSlot = ctx.slotIdx
                 ctx.limb.pain = math.Clamp((ctx.limb.pain or 0) + 12, 0, 100)
+                -- RU: жгут лечит артериальное — снимаем флаг и статус на этой и нижележащих конечностях
+                do
+                    local LowerLimbsClear = {
+                        ["thigh_R"]={"thigh_R","crus_R","foot_R"},["crus_R"]={"crus_R","foot_R"},["foot_R"]={"foot_R"},
+                        ["thigh_L"]={"thigh_L","crus_L","foot_L"},["crus_L"]={"crus_L","foot_L"},["foot_L"]={"foot_L"},
+                        ["arm_R"]={"arm_R","forearm_R","hand_R"},["forearm_R"]={"forearm_R","hand_R"},["hand_R"]={"hand_R"},
+                        ["arm_L"]={"arm_L","forearm_L","hand_L"},["forearm_L"]={"forearm_L","hand_L"},["hand_L"]={"hand_L"},
+                    }
+                    local srcId = ctx.limbId or ctx.limb.id
+                    for _, nm in ipairs(LowerLimbsClear[srcId] or {srcId}) do
+                        local ll = ctx.limbs and ctx.limbs[nm] or (nm==srcId and ctx.limb or nil)
+                        if ll then ll.arterialBleed=nil; if ll.customStatuses then ll.customStatuses["ARTERIAL_BLEED"]=nil end; ll.bleed=math.Clamp((ll.bleed or 0)*0.3,0,100) end
+                    end
+                    ctx.setStatus("ARTERIAL_BLEED", nil)
+                end
                 ctx.setStatus("TOURNIQUET", 0.01)
                 if ctx.slot then
                     ctx.slot.type = "empty"
