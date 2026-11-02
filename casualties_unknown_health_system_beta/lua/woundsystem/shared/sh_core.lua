@@ -49,7 +49,12 @@ WoundSystem.NetStrings = WoundSystem.NetStrings or {
     "WoundSystem_RagdollState",
     "WoundSystem_SkillLevelUp",
     "WoundSystem_SetServerConVar",
-    "WoundSystem_AdminDebugAction"
+    "WoundSystem_AdminDebugAction",
+    "WoundSystem_GlassStart",
+    "WoundSystem_GlassRequest",
+    "WoundSystem_GlassSuccess",
+    "WoundSystem_GlassPain",
+    "WoundSystem_GlassFaint"
 }
 
 function WoundSystem.NormalizeItemId(itemId)

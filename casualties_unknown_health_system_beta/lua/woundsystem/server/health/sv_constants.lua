@@ -49,6 +49,12 @@ Constants.DislocationPainBlock = 75
 Constants.DislocationSuccessTimer = 3
 Constants.DislocationInputTimeout = 1.5
 
+-- RU: expanded damage perception range (Z-City bridge) - lower thresholds, higher sensitivity
+Constants.DamagePerceptionRangeMult = 1.45
+Constants.GlassShardFinishX = 421.82
+Constants.GlassShardFinishY = 229.82
+Constants.GlassPainBlock = 75
+Constants.GlassFallPainFloor = 28
 Constants.FallbackWorldTools = { "BRUISE KIT", "DISINFECTANT", "GAUZE", "INJECTION", "AED" }
 Constants.ForceWorldAedSpawns = false
 Constants.RagdollWakeBridgeDuration = 0.55
