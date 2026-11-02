@@ -225,73 +225,10 @@ if SERVER then
 		end)
 
 		
-		local co 
-
 		if not IsValid(self) then return end
-		if self.Oskole then 
-			local Poof=EffectData()
-			Poof:SetOrigin(SelfPos)
-			Poof:SetScale(1.5)
-			util.Effect(self.ShrapnelEffect,Poof,true,true)
-			co = coroutine.create(function()
-				local LastShrapnel = SysTime()
-				local vecCone = Vector(5, 5, 0)
-				local forward = self:GetAngles():Forward()
-				local selfowner = self.owner
-				local selfFragmentation = self.Fragmentation
-				for i = 1, self.Fragmentation do
-						LastShrapnel = SysTime()
-
-						local dir = VectorRand(-1,1):GetNormalized()--vector_up
-						dir[3] = dir[3] > 0 and math.abs(dir[3] - 0.5) or -math.abs(dir[3] + 0.5)
-						dir:Normalize()
-
-						local Tr = util.QuickTrace(SelfPos, dir * 10000, self)
-						if Tr.Hit and !Tr.HitSky and !Tr.HitWorld then
-							local bullet = {}
-							bullet.Src = SelfPos
-							bullet.Spread = vecCone
-							bullet.Force = 20
-							bullet.Damage = 40
-							bullet.AmmoType = "Metal Debris"
-							bullet.Attacker = self.owner
-							bullet.Inflictor = self
-							bullet.Distance = 16756
-							bullet.DisableLagComp = true
-							bullet.Filter = {self}
-							bullet.Dir = dir
-							if not IsValid(self) then
-								self = Entity(1)
-							end
-							--bullet.Spread = vecCone * i / self.Fragmentation
-							self:FireLuaBullets(bullet, true)
-						end
-
-						LastShrapnel = SysTime() - LastShrapnel
-						if LastShrapnel > 0.001 then
-							coroutine.yield()
-						end
-				end
-				self.ShrapnelDone = true
-			end)
-		end
-
-        util.ScreenShake(SelfPos,100,200,1,3000)
-
-		coroutine.resume(co)
-		local index = self:EntIndex()
-		timer.Create("GrenadeCheck_" .. index, 0, 0, function()
-			if !IsValid(self) then
-				timer.Remove("GrenadeCheck_" .. index)
-			end
-			coroutine.resume(co)
-			if self.ShrapnelDone then
-				if not IsValid(self) then return end
-				self:StopSound("weapons/ins2rpg7/rpg_rocket_loop.wav")
-				SafeRemoveEntity(self)
-				timer.Remove("GrenadeCheck_" .. index)
-			end
-		end)
+		-- SHRAPNEL REMOVED: blast only per RU request
+		util.ScreenShake(SelfPos,100,200,1,1000)
+		timer.Simple(0.08, function() if IsValid(self) then self:StopSound("weapons/ins2rpg7/rpg_rocket_loop.wav") SafeRemoveEntity(self) end end)
 	end
 elseif CLIENT then
 	function ENT:Draw()

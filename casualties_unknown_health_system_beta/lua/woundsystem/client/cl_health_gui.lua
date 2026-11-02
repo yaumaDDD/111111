@@ -3595,6 +3595,8 @@ local function IsCasStyleCriticallyDying(cardio)
 end
 
 function WoundSystemDrawCriticalVitalsWarning()
+    -- C:U CRITICAL VITALS WARNING DISABLED along with left panel (user request 2026-11-02)
+    do return end
     local cardio = CardioState
 
     local isCritical = IsCasStyleCriticallyDying(cardio)
@@ -4097,14 +4099,21 @@ hook.Add("HUDPaint", "WoundDollAndPanel", function()
         end
     end
 
-    local panelX = 20 * scale
-    local panelW, panelH = 475 * scale, 810 * scale
-    local panelCenterY = (20 * scale) + (panelH / 2) 
-    local currentPanelH = panelH * smoothProgress
+    -- C:U LEFT VITAL PANEL REMOVED (pulse/blood pressure/oxygen etc) — user request 2026-11-02
+    -- Original panel (~400 lines) wrapped in dead branch so HUD still has doll/minigames without vital stats.
+    -- Keep dummy locals for later overPanel closure logic.
+    local panelX, panelW, panelH = 0, 0, 0
+    local panelCenterY, currentPanelH = 0, 0
+    if false then
+    do -- dead wrapper for original panel locals (keeps file valid if editors fold)
+    local _orig_panelX = 20 * scale
+    local _orig_panelW, _orig_panelH = 475 * scale, 810 * scale
+    local _orig_panelCenterY = (20 * scale) + (_orig_panelH / 2) 
+    local _orig_currentPanelH = _orig_panelH * smoothProgress
     
     SetGuiMaterial(mats.compback)
     surface.SetDrawColor(255, 255, 255, 255)
-    DrawRectInt(panelX, panelCenterY - (currentPanelH / 2), panelW, currentPanelH)
+    DrawRectInt(_orig_panelX, _orig_panelCenterY - (_orig_currentPanelH / 2), _orig_panelW, _orig_currentPanelH)
     
     if smoothProgress > 0.05 then
         local textX, textY = panelX + (25 * scale), (20 * scale) + (25 * scale)
@@ -4592,12 +4601,14 @@ hook.Add("HUDPaint", "WoundDollAndPanel", function()
         
         -- (the WoundSystem inventory panel was removed: items are the Z-City SWEPs)
     end
+    end -- close dead-wrapper: end _orig_panel  if false + do
+    end -- close dead-wrapper: if false (left panel)
 
     WoundSystemSelectedLimbId = GUIState.selectedLimbData and GUIState.selectedLimbData.id or nil
 
-    -- A click on an empty spot (not on a limb, the action button, the info panel or a minigame) closes the wound view
+    -- Left vital panel removed — original overPanel check disabled; only limb/action ownership closes HUD
     do
-        local overPanel = mx >= panelX and mx <= panelX + panelW and my >= (20 * scale) and my <= (20 * scale) + panelH
+        local overPanel = false -- mx >= panelX and mx <= panelX + panelW and my >= (20 * scale) and my <= (20 * scale) + panelH -- REMOVED
         local ownsClick = hoveredLimbId or GUIState.actionPointHovered or overPanel
             or minigameActive or (WoundSystemWorldDrag and WoundSystemWorldDrag.active)
             or (WoundSystem.HealthGUI.IsExternalMenuOpen and WoundSystem.HealthGUI.IsExternalMenuOpen())

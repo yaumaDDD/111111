@@ -62,42 +62,20 @@ function ENT:ActivateExplosive()
 
 	local num = 120
 
-	local co = coroutine.create(function()
-		local LastShrapnel = SysTime()
-
-		for i = 1, num do
-			LastShrapnel = SysTime()
-			local vecCone = Vector(
-				(i / num) ^ 4 / 5 * 5 * 5 + (math.random(0, 1) and math.random(100) / 100),
-				(i / num) ^ 4 / 2 * 5 + (math.random(0, 1) and math.random(100) / 100),
-				0
-			)
-			bullet.Spread = vecCone
-			bullet.Penetration = math.Clamp(num / i, 5, 10) * 10
-			-- for i2 = 1, 5 do
-				--if not IsValid(self) then return end
-			if not IsValid(self) then return end
-			self:FireLuaBullets(bullet,true)
-
-			LastShrapnel = SysTime() - LastShrapnel
-
-			if LastShrapnel > 0.001 then
-				coroutine.yield()
-			end
-
-			self.ShrapnelDone = true
+	-- SHRAPNEL REMOVED coroutine
+	self.ShrapnelDone = true
 			--end
 		end
 	end)
 
-	coroutine.resume(co)
+	-- SHRAPNEL REMOVED coroutine.resume(co)
 	local index = self:EntIndex()
 	timer.Create("GrenadeCheck_" .. index, 0, 0, function()
 		if !IsValid(self) then
 			timer.Remove("GrenadeCheck_" .. index)
 		end
 
-		coroutine.resume(co)
+		-- SHRAPNEL REMOVED coroutine.resume(co)
 
 		if self.ShrapnelDone then
 			util.ScreenShake(selfPos, 20, 20, 1, 500)
