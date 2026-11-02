@@ -496,7 +496,9 @@ local furBloodVisualRegions = {
     { id = "rightLeg", normalizer = 30 }
 }
 
+-- C:U FUR BLOOD DISABLED — replaced with Z-City decals (user request 2026-11-02)
 local function CanDrawModelFurBlood(ent, source)
+    do return 0 end
     source = IsValid(source) and source or ent
 
     if not CVars.FurBloodModels:GetBool() or LowEndMode() then return 0 end
