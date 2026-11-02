@@ -257,10 +257,10 @@ local function DrawMinigameHeader()
         value = tostring(math.max(MG.remaining or 0, 0)) .. "/" .. tostring(PIECE_COUNT),
         curValue = MG.remaining or 0,
         maxValue = PIECE_COUNT,
-        icon = "casunknown-images/shrapnelminigame/shrapnelpiece.png",
+        icon = "casunknown-images/icons/shrapnel.png",
         pw = 30,
         ph = 30,
-        valueColor = Color(150, 205, 235, 255)
+        valueColor = Color(155, 110, 62, 255)
     })
 end
 

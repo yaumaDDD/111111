@@ -129,3 +129,12 @@ function WB.BoneToWS(bonename)
 		if string.find(name, entry[1], 1, true) then return entry[2] end
 	end
 end
+
+-- Human-readable C:U limb names for the radial "Remove glass" submenu.
+WB.LimbNames = {
+	head = "Head", thorax = "Chest", abdomen = "Abdomen",
+	arm_L = "Left upper arm", forearm_L = "Left forearm", hand_L = "Left hand",
+	arm_R = "Right upper arm", forearm_R = "Right forearm", hand_R = "Right hand",
+	thigh_L = "Left thigh", crus_L = "Left shin", foot_L = "Left foot",
+	thigh_R = "Right thigh", crus_R = "Right shin", foot_R = "Right foot",
+}

@@ -36,10 +36,6 @@ WB.cvGlass = WB.cvGlass or (ConVarExists("zc_woundsystem_glass") and GetConVar("
 	or CreateConVar("zc_woundsystem_glass", "1", FCVAR_ARCHIVE,
 		"1 = Z-City glass damage leaves superficial cuts and glass shards in a C:U limb", 0, 1))
 
-WB.cvGlassAuto = WB.cvGlassAuto or (ConVarExists("zc_woundsystem_glass_auto") and GetConVar("zc_woundsystem_glass_auto")
-	or CreateConVar("zc_woundsystem_glass_auto", "1", FCVAR_ARCHIVE,
-		"1 = the glass shard minigame opens by itself when shards get into a limb", 0, 1))
-
 local function dbg(...)
 	if WB.cvDebug:GetBool() then print("[ZC<->WoundSystem]", ...) end
 end
@@ -364,8 +360,9 @@ function WB.ApplyFall(ply, dmgInfo)
 	return true
 end
 
---- Mild trauma from a fall, using ONLY Z-City's DMG_FALL damage. No wounds, no bleeding,
---- no fractures / dislocations / internal bleeding: muscle, pain and a little adrenaline.
+--- Trauma from a fall, using ONLY Z-City's DMG_FALL damage. No wounds, no bleeding,
+--- no fractures / dislocations / internal bleeding: muscle damage + persistent pain
+--- on the exact limb that hit the ground; the pain is removed only by Z-City painkillers.
 function WB.ApplyFallBruise(ply, dmgInfo)
 	local H = Health()
 	local limbs = WB.GetLimbs(ply)
@@ -380,10 +377,11 @@ function WB.ApplyFallBruise(ply, dmgInfo)
 	if not l or l.dismembered then return false end
 
 	local zcDamage = math.Clamp((dmgInfo and dmgInfo:GetDamage() or 0) * WB.cvDamageScale:GetFloat(), 0, 100)
-	local bruise = math.Clamp(zcDamage * 0.12, 0, 12)
+	local bruise = math.Clamp(zcDamage * 0.6, 4, 45)
 
-	l.muscle = math.Clamp((l.muscle or 100) - bruise * 0.6, 0, 100)
+	l.muscle = math.Clamp((l.muscle or 100) - bruise * 1.1, 0, 100)
 	l.pain = math.Clamp((l.pain or 0) + bruise, 0, 100)
+	WB.AddPersistentPain(ply, limbId, bruise)
 	local body = WB.GetBody(ply)
 	if body then body.adrenaline = math.Clamp((body.adrenaline or 0) + bruise * 0.15, 0, 100) end
 
@@ -568,6 +566,7 @@ function WB.ResetOrganism(ent)
 	local H = Health()
 	if not (H and H.ResetPlayer) or not H.ResetPlayer(ply) then return false end
 	if WB.ClearGlass then WB.ClearGlass(ply) end
+	WB.ClearPersistentPain(ply)
 
 	local org = ply.organism
 	if org then
@@ -700,6 +699,91 @@ function WB.FixDislocation(fixer, args)
 	return true
 end
 
+--- Pain that does NOT fade by itself. WoundSystem pulls limb pain back to ~15 every tick,
+--- so the bridge keeps this floor. The ONLY way to remove it is a Z-City painkiller
+--- (MORPHINE / FENTANYL through WB.SwepHeal).
+function WB.AddPersistentPain(ply, limbId, amount)
+	if not IsValid(ply) or not limbId then return end
+	ply._WBPersistentPain = ply._WBPersistentPain or {}
+	local t = ply._WBPersistentPain
+	t[limbId] = math.Clamp((t[limbId] or 0) + (tonumber(amount) or 0), 0, 100)
+end
+
+function WB.ClearPersistentPain(ply)
+	ply._WBPersistentPain = nil
+end
+
+function WB.RelievePersistentPain(ply, amount)
+	local t = ply._WBPersistentPain
+	if not t then return false end
+
+	local H = Health()
+	local limbs = WB.GetLimbs(ply)
+	amount = math.abs(tonumber(amount) or 0)
+	for limbId, value in pairs(t) do
+		local left = math.max(0, value - amount)
+		if left <= 0 then t[limbId] = nil else t[limbId] = left end
+		local l = limbs and limbs[limbId]
+		if l then
+			l.pain = math.Clamp(math.min(l.pain or 0, left), 0, 100)
+			if H and H.SendLimbUpdate then H.SendLimbUpdate(ply, limbId, true) end
+		end
+	end
+	if not next(t) then ply._WBPersistentPain = nil end
+	return true
+end
+
+--- Growing pain from glass shards -> standard WoundSystem shock / unconscious ragdoll
+--- (TryCreateUnconsciousRagdoll already goes through Z-City's hg.Fake).
+function WB.TickPersistentPain(ply, body, dt)
+	local limbs = WB.GetLimbs(ply)
+	if not limbs or not body then return end
+	local H = Health()
+
+	local glass = WB.GlassShards[ply]
+	if glass then
+		for limbId, count in pairs(glass) do
+			if count > 0 then WB.AddPersistentPain(ply, limbId, count * 0.9 * (dt or 0)) end
+		end
+	end
+
+	local t = ply._WBPersistentPain
+	if not t then return end
+
+	local maxPain = 0
+	for limbId, value in pairs(t) do
+		if value <= 0 then t[limbId] = nil continue end
+		local l = limbs[limbId]
+		if not l or l.dismembered then t[limbId] = nil continue end
+		if (l.pain or 0) < value then
+			l.pain = value
+			-- do not spam the limb packet every Org Think
+			if (ply._WBNextPainSync or 0) <= CurTime() then
+				ply._WBNextPainSync = CurTime() + 0.25
+				if H and H.SendLimbUpdate then H.SendLimbUpdate(ply, limbId, true) end
+			end
+		end
+		maxPain = math.max(maxPain, value)
+	end
+	if not next(t) then ply._WBPersistentPain = nil return end
+	if maxPain < 85 then return end
+
+	-- «как и всегда»: боль -> шок -> бессознательное состояние, держится пока боль не снята
+	body.consciousness = math.min(body.consciousness or 100, 5)
+	body.unconscious = true
+	body.wasUnconscious = true
+	if (ply._WBNextPainKnockout or 0) <= CurTime() then
+		ply._WBNextPainKnockout = CurTime() + 12
+		if H and H.AddBodyShock then H.AddBodyShock(body, 100) end
+		body.fallingRagdoll = true
+		body.fallingRagdollWakeTime = CurTime() + 6
+		body.fallingRagdollReason = "glass_pain"
+		if H and H.TryCreateUnconsciousRagdoll then H.TryCreateUnconsciousRagdoll(ply, body) end
+		if H and H.SendCardioUpdate then H.SendCardioUpdate(ply, true) end
+		dbg("pain knockout", ply, maxPain)
+	end
+end
+
 function WB.Think(owner, org, dt)
 	if not IsValid(owner) or not owner:IsPlayer() or not owner:Alive() then return end
 
@@ -708,6 +792,9 @@ function WB.Think(owner, org, dt)
 	if not body then return end
 
 	org.timeValue = dt
+
+	-- pain that only a Z-City painkiller can take away (falls / glass shards)
+	WB.TickPersistentPain(owner, body, dt)
 
 	-- Z-City pain of a dislocated leg (running on it writes org.painadd) becomes C:U pain of that limb
 	local pa = org.painadd
@@ -1385,6 +1472,11 @@ function WB.SwepHeal(swep, ent, mode, bone)
 
 	if not done then return false end
 
+	-- ONLY a Z-City painkiller removes the persistent fall / glass pain
+	if spec.item == "MORPHINE" or spec.item == "FENTANYL" then
+		WB.RelievePersistentPain(target, 45)
+	end
+
 	-- one-shot items vanish when used up
 	AfterUse(swep, spec, idx)
 
@@ -1406,6 +1498,7 @@ for _, name in ipairs({
 	"WoundSystem_ShrapnelStart",
 	"WoundSystem_ShrapnelInput",
 	"WoundSystem_GlassStatus",
+	"WoundSystem_GlassRadial",
 }) do
 	util.AddNetworkString(name)
 end
@@ -1640,12 +1733,7 @@ function WB.AddGlass(ply, limbId, count)
 	if count <= 0 or not limbId then return false end
 
 	local newCount = WB.SetGlass(ply, limbId, WB.GetGlass(ply, limbId) + count)
-
-	local cvAuto = WB.cvGlassAuto or GetConVar("zc_woundsystem_glass_auto")
-	if cvAuto and cvAuto:GetBool() and not Sessions[ply] and not WB.IsMinigameBusy(ply) then
-		WB.StartGlassMinigame(ply, limbId, true)
-	end
-
+	-- NEVER auto-start: only the player himself opens the minigame (radial submenu / wound view)
 	return newCount
 end
 
@@ -1693,6 +1781,12 @@ net.Receive("WoundSystem_ShrapnelStart", function(_, ply)
 	end
 
 	WB.StartGlassMinigame(ply, limbId, false)
+end)
+
+-- radial "Remove glass" -> the player picked a limb himself; no health HUD needed
+net.Receive("WoundSystem_GlassRadial", function(_, ply)
+	if not WB.IsBridged(ply) then return end
+	WB.StartGlassMinigame(ply, net.ReadString(), true)
 end)
 
 net.Receive("WoundSystem_ShrapnelClose", function(_, ply)
@@ -1854,12 +1948,14 @@ end)
 
 hook.Add("PlayerSpawn", "WoundBridge_GlassSpawn", function(ply)
 	GlassShards[ply] = nil
+	WB.ClearPersistentPain(ply)
 	CloseGlassSession(ply, "respawn")
 	WB.SendGlassStatus(ply)
 end)
 
 hook.Add("PostPlayerDeath", "WoundBridge_GlassDeath", function(ply)
 	CloseGlassSession(ply, "dead")
+	WB.ClearPersistentPain(ply)
 end)
 
 hook.Add("PlayerDisconnected", "WoundBridge_GlassDisconnect", function(ply)

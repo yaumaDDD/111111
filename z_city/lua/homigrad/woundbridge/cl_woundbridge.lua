@@ -38,4 +38,27 @@ hook.Add("radialOptions", "ZCity_WoundBridge_Inspect", function()
 	if not IsValid(ply) or not ply:Alive() then return end
 
 	hg.radialOptions[#hg.radialOptions + 1] = {function() WB.OpenWoundView() end, "Examine Body"}
+
+	-- Glass shards: the player HIMSELF opens the minigame and picks the limb in a radial submenu.
+	local shards = WoundSystemGlassShards or {}
+	local total = 0
+	for _, n in pairs(shards) do total = total + (n or 0) end
+	if total > 0 then
+		hg.radialOptions[#hg.radialOptions + 1] = {function()
+			local current = WoundSystemGlassShards or {}
+			local commands = {}
+			for _, limbId in ipairs(WB.WSLimbs or {}) do
+				local n = current[limbId] or 0
+				if n > 0 then
+					local id = limbId
+					commands[#commands + 1] = {function()
+						net.Start("WoundSystem_GlassRadial")
+							net.WriteString(id)
+						net.SendToServer()
+					end, (WB.LimbNames and WB.LimbNames[id] or id) .. " (" .. n .. ")"}
+				end
+			end
+			if #commands > 0 and hg.CreateRadialMenu then hg.CreateRadialMenu(commands) end
+		end, "Remove glass"}
+	end
 end)

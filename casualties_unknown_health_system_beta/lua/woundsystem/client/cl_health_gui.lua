@@ -973,7 +973,7 @@ Icons = {
     limbbleed = PaddedMaterial(bottomuiPath .. "limbbleed.png"),
     uiPoint = PaddedMaterial(path .. "screen/uiPoint.png"),
     -- glass shard sprite (shared with the glass minigame); no shrapnel status icon remains
-    glass = PaddedMaterial("casunknown-images/shrapnelminigame/shrapnelpiece.png")
+    glass = PaddedMaterial(iconPath .. "shrapnel.png")
 }
 
 if cvars and cvars.AddChangeCallback then
