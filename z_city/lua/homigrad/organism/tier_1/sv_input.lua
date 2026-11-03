@@ -470,7 +470,7 @@ hook.Add("EntityTakeDamage", "homigrad-damage", function(ent, dmgInfo)
 	if not org then return end
 
 	-- Fall of a living WoundSystem player: C:U fall model (landing speed -> impact on feet / shins)
-	if dmgInfo:IsFallDamage() and ent:IsPlayer() and hg.WoundBridge and hg.WoundBridge.IsBridged(ent) then
+	if dmgInfo:IsDamageType(DMG_FALL) and ent:IsPlayer() and hg.WoundBridge and hg.WoundBridge.IsBridged(ent) then
 		if org.godmode then return true end
 		hg.WoundBridge.ApplyFall(ent, dmgInfo)
 		return true

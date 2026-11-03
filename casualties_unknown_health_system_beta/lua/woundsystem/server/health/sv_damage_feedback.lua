@@ -30,7 +30,7 @@ local function DamageFeedbackKind(dmginfo)
     if dmginfo:IsDamageType(DMG_BURN) or dmginfo:IsDamageType(DMG_DIRECT) then
         kind = bit.bor(kind, DAMAGE_FEEDBACK_KIND.burn)
     end
-    if dmginfo:IsFallDamage() then
+    if dmginfo:IsDamageType(DMG_FALL) then
         kind = bit.bor(kind, DAMAGE_FEEDBACK_KIND.fall)
     end
     if DMG_RADIATION and dmginfo:IsDamageType(DMG_RADIATION) then

@@ -2157,6 +2157,7 @@ local function ProcessImpactDamage(ply, limb, force, boneOverride)
     local boneDamage = force / (math.Rand(jumpSpeed * 4.0, jumpSpeed * 7.0) * structuralMultiplier)
     -- a fall gives the bone damage directly (from the landing speed, see the fall branch of HandleDamage)
     if boneOverride then boneDamage = boneOverride * math.Rand(0.85, 1.15) end
+    if boneOverride and WoundSystem.Health.FallDebug then WoundSystem.Health.FallDebug(ply, limb, force, boneDamage) end
 
     if extremity then
         -- Z-City legs() / arms(): below 0.7 (arms 0.6) nothing; from there a blunt hit dislocates; at 1 or more it breaks
@@ -3413,7 +3414,7 @@ local function TryCreateUnconsciousRagdoll(ply, body)
 end
 
 local function IsWeaponKnockdownDamage(dmginfo)
-    if dmginfo:IsFallDamage() or dmginfo:IsDamageType(DMG_RADIATION) then return false end
+    if dmginfo:IsDamageType(DMG_FALL) or dmginfo:IsDamageType(DMG_RADIATION) then return false end
     if dmginfo:IsDamageType(DMG_DROWN) or dmginfo:IsDamageType(DMG_POISON) then return false end
 
     if dmginfo:IsDamageType(DMG_BULLET)
@@ -3646,7 +3647,7 @@ local function DamageInfoHasClassPattern(dmginfo, patterns)
 end
 
 local function IsDamageTypeProtectedFromMeleeNormalize(dmginfo)
-    return dmginfo:IsFallDamage()
+    return dmginfo:IsDamageType(DMG_FALL)
         or dmginfo:IsDamageType(DMG_BULLET)
         or dmginfo:IsDamageType(DMG_BUCKSHOT)
         or dmginfo:IsDamageType(DMG_BLAST)
@@ -6357,7 +6358,7 @@ WoundSystem.Health.HandleDamage = function(ent, dmginfo)
     -- ==========================================
     -- 2. ACTIVE PLAYER DAMAGE HANDLING
     -- ==========================================
-    if dmginfo:IsFallDamage() then
+    if dmginfo:IsDamageType(DMG_FALL) then
         fallSpeed = WoundSystem.Health.GetRecentFallSpeed(ply, dmg)
         fallForce = WoundSystem.Health.FallSpeedToImpactForce(fallSpeed)
         if ply._woundSystemLastFallOnFloater then
@@ -6404,7 +6405,7 @@ WoundSystem.Health.HandleDamage = function(ent, dmginfo)
     -- ==========================================
     -- NEUROGENIC SHOCK: Sudden massive pain spike
     -- ==========================================
-    local painSpikeDmg = dmginfo:IsFallDamage() and (fallForce * 2.0) or (rawDmg or dmg)
+    local painSpikeDmg = dmginfo:IsDamageType(DMG_FALL) and (fallForce * 2.0) or (rawDmg or dmg)
     if painSpikeDmg >= 40 and not body.unconscious and not Fn.IsBulletImpactDamage(dmginfo) then
         local shockDuration = math.Rand(1.5, 3.5)
         Fn.AddBodyShock(body, math.Clamp(painSpikeDmg * 0.5, 20, 100))
@@ -6424,7 +6425,7 @@ WoundSystem.Health.HandleDamage = function(ent, dmginfo)
             EmitDamageBodyFlow(ply, dmginfo, dmg, limb)
         end
 
-        if dmginfo:IsFallDamage() then
+        if dmginfo:IsDamageType(DMG_FALL) then
             ply._nextLimbPhysicsDamage = ply._nextLimbPhysicsDamage or {}
             ply._nextLimbPhysicsDamage[limb] = math.max(ply._nextLimbPhysicsDamage[limb] or 0, CurTime() + 0.12)
             ProcessImpactDamage(ply, limb, fallForce, fallBone or 0)
@@ -6676,7 +6677,7 @@ WoundSystem.Health.HandleDamage = function(ent, dmginfo)
         SendLimbUpdate(ply, limb, true)
     end
 
-    if dmginfo:IsFallDamage() and fallForce > ((body and body.jumpSpeed) or 6.5) * 2.0 then
+    if dmginfo:IsDamageType(DMG_FALL) and fallForce > ((body and body.jumpSpeed) or 6.5) * 2.0 then
         if not body.unconscious then
             body.fallingRagdoll = true
             body.fallingRagdollWakeTime = CurTime() + 3.0
@@ -6687,7 +6688,7 @@ WoundSystem.Health.HandleDamage = function(ent, dmginfo)
         end
     end
 
-    if not dmginfo:IsFallDamage() and dmg > 5 then
+    if not dmginfo:IsDamageType(DMG_FALL) and dmg > 5 then
         body.adrenaline = math.Clamp((body.adrenaline or 0) + (dmg * 1.2), 0, 100)
     end
 

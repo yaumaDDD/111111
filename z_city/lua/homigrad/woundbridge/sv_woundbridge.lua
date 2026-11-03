@@ -313,6 +313,54 @@ end
 --- onRagdoll true when the hit landed on the fake ragdoll (limb from the physics bone), false for a standing player
 ---           (limb from the engine hitgroup: the bone of a player trace is meaningless)
 --- Returns true when WoundSystem processed the hit.
+--- Fall guard. A fall makes no blood (Z-City dmgBlood = 0): for a few seconds after a landing nothing may open a wound on the
+--- player except a real weapon hit or glass. Whatever else tries (ragdoll bounces, rough surfaces, side effects of the knockdown)
+--- is undone in WB.Sync, and the limb it happened on is printed with zc_woundsystem_bridge_debug 1.
+function WB.StartFallGuard(ply)
+	local limbs = WB.GetLimbs(ply)
+	if not limbs then return end
+	local g = {till = CurTime() + 4, bleed = {}, skin = {}, muscle = {}}
+	for id, l in pairs(limbs) do
+		g.bleed[id] = l.bleed or 0
+		g.skin[id] = l.skin or 100
+		g.muscle[id] = l.muscle or 100
+	end
+	ply._wbFallGuard = g
+end
+
+function WB.RunFallGuard(ply, limbs)
+	local g = ply._wbFallGuard
+	if not g then return end
+	if CurTime() > g.till then ply._wbFallGuard = nil return end
+
+	local H = Health()
+	for id, l in pairs(limbs) do
+		local b, base = l.bleed or 0, g.bleed[id] or 0
+		if b > base + 0.01 then
+			dbg("fall guard: undone bleeding", ply, id, "+" .. string.format("%.2f", b - base))
+			l.bleed = base
+			if H and H.SendLimbUpdate then H.SendLimbUpdate(ply, id, true) end
+		elseif b < base then
+			g.bleed[id] = b -- it was healed meanwhile
+		end
+		local mu, mbase = l.muscle or 100, g.muscle[id] or 100
+		if mu < mbase - 2 and not (string.find(id, "^crus_") or string.find(id, "^foot_")) then
+			dbg("fall guard: undone muscle damage", ply, id, "-" .. string.format("%.1f", mbase - mu))
+			l.muscle = mbase
+			if H and H.SendLimbUpdate then H.SendLimbUpdate(ply, id, true) end
+		elseif mu > mbase then
+			g.muscle[id] = mu
+		end
+		local sk, sbase = l.skin or 100, g.skin[id] or 100
+		if sk < sbase - 0.01 then
+			l.skin = sbase
+			if H and H.SendLimbUpdate then H.SendLimbUpdate(ply, id, true) end
+		elseif sk > sbase then
+			g.skin[id] = sk
+		end
+	end
+end
+
 function WB.ApplyDamage(ply, dmgInfo, bonename, hitgroup, rawDamage, onRagdoll)
 	if not WB.IsBridged(ply) then return false end
 
@@ -325,6 +373,9 @@ function WB.ApplyDamage(ply, dmgInfo, bonename, hitgroup, rawDamage, onRagdoll)
 
 	-- nerve gas: Z-City gives it no wound, only the lung damage (hg.organism.GasDamage -> WB.SyncToxins)
 	if dmgInfo:IsDamageType(DMG_NERVEGAS) and not dmgInfo:IsDamageType(DMG_BULLET + DMG_BLAST + DMG_SLASH + DMG_CLUB + DMG_BUCKSHOT) then return true end
+
+	-- a real hit (not a fall): the fall guard is over
+	if ply._wbFallGuard and not dmgInfo:IsDamageType(DMG_FALL + DMG_CRUSH) then ply._wbFallGuard = nil end
 
 	local clone = CloneDamageInfo(dmgInfo, damage)
 
@@ -412,6 +463,7 @@ function WB.SurfaceCut(ply, limbId, force, surface)
 
 	local jump = (body and body.jumpSpeed) or 6.5
 	if force <= jump * 1.2 or math.random(2) ~= 1 then return false end
+	ply._wbFallGuard = nil -- a cut by glass is allowed
 
 	l.skin = math.Clamp((l.skin or 100) - force * 0.8, 0, 100)
 	l.bleed = math.Clamp((l.bleed or 0) + force * 0.2, 0, 100)
@@ -532,6 +584,8 @@ function WB.LandingHit(ply, inWater, onFloater, speed)
 	ply._woundSystemLastFallSpeedTime = CurTime()
 	ply._woundSystemLastFallOnFloater = false
 
+	WB.StartFallGuard(ply)
+
 	local dmg = DamageInfo()
 	dmg:SetDamage(math.max((speed - 526.5) / 3.96, 0.01))
 	dmg:SetDamageType(DMG_FALL)
@@ -567,6 +621,14 @@ hook.Add("Move", "ZCity_WoundBridge_FallTrack", function(ply, mv)
 	end
 end)
 
+-- diagnostics for the leg bone damage of a fall (zc_woundsystem_bridge_debug 1)
+local function hookFallDebug()
+	local H = Health()
+	if H then H.FallDebug = function(ply, limb, force, bone) dbg("fall bone", ply, limb, "force " .. string.format("%.1f", force) .. " bone " .. string.format("%.2f", bone)) end end
+end
+hookFallDebug()
+hook.Add("InitPostEntity", "ZCity_WoundBridge_FallDebug", hookFallDebug)
+
 hook.Add("OnPlayerHitGround", "ZCity_WoundBridge_Fall", function(ply, inWater, onFloater, speed)
 	WB.LandingHit(ply, inWater, onFloater, speed)
 end)
@@ -588,6 +650,14 @@ function WB.AddWoundManual(ent, dmgBlood, bone, glass)
 	local H = Health()
 	local limbs = WB.GetLimbs(ply)
 	if not limbs then return true end
+
+	if ply._wbFallGuard then
+		if not glass then
+			dbg("fall guard: wound ignored", ply, tostring(bone), tonumber(dmgBlood))
+			return true
+		end
+		ply._wbFallGuard = nil
+	end
 
 	local bonename = bone
 	if isnumber(bone) then bonename = ent:GetBoneName(bone) end
@@ -680,6 +750,7 @@ function WB.Sync(ply, org)
 
 	local limbs = WB.GetLimbs(ply)
 	ply._WBLimbSnapshot = limbs or ply._WBLimbSnapshot
+	if limbs and ply._wbFallGuard then WB.RunFallGuard(ply, limbs) end
 
 	org.alive = ply:Alive()
 	org.isPly = true
