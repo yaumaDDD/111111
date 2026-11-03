@@ -3318,6 +3318,13 @@ hook.Add("PlayerSpawn", "WoundSystem_ResetSpawnVisualState", function(ply)
 end)
 
 local function DrawConsciousnessBlackout()
+    -- Z-City integration: the WoundSystem unconscious screen (black-out, vignette, brain circle, ECG) is removed: the standard Z-City
+    -- unconscious / consciousness screen is used (the shadow organism carries the WoundSystem consciousness)
+    if HasUnconsciousVisualState() then
+        ClearUnconsciousVisualState()
+    end
+    do return end
+
     if not WoundSystemClientEnabled() then
         if HasUnconsciousVisualState() then
             ClearUnconsciousVisualState()
@@ -3660,7 +3667,7 @@ function WoundSystemDrawLimbActionRow(limbId, state, actionStatus, rowIndex, poi
     end
 
     local pointCenterX = actionButtonPos.x or targetCenterX
-    local pointCenterY = (actionButtonPos.y or targetCenterY) + (rowIndex * 50 * scale)
+    local pointCenterY = (actionButtonPos.y or targetCenterY) + (rowIndex * 84 * scale)
     local pointX = pointCenterX - (pointW * 0.5)
     local pointY = pointCenterY - (pointH * 0.5)
     local pad = 14 * scale
