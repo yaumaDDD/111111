@@ -1004,6 +1004,26 @@ WoundSystemLimbUIConfig = {
                 OffsetY = -60,
                 TextOffsetX = -92,
                 TextOffsetY = -20
+            },
+            BANDAGE = {
+                Text = "APPLY BANDAGE",
+                TooltipKey = "applybandage",
+                Width = 195,
+                Height = 60,
+                OffsetX = 0,
+                OffsetY = -60,
+                TextOffsetX = -92,
+                TextOffsetY = -20
+            },
+            UNBANDAGE = {
+                Text = "REMOVE BANDAGE",
+                TooltipKey = "removebandage",
+                Width = 205,
+                Height = 60,
+                OffsetX = 0,
+                OffsetY = -60,
+                TextOffsetX = -98,
+                TextOffsetY = -20
             }
         }
     },
@@ -1126,7 +1146,9 @@ WoundSystemCasTooltipText = {
     removetourniquet = {"Remove tourniquet", ""},
     removeshrapnel = {"Remove shrapnel", "Try to remove shrapnel by hand"},
     removesplint = {"Remove splint", "Take off the splint from the limb"},
-    fixdislocation = {"Fix dislocation", "Try to correct the dislocation by hand"}
+    fixdislocation = {"Fix dislocation", "Try to correct the dislocation by hand"},
+    applybandage = {"Apply bandage", "Bandage the wound with a bandage you carry. A bandage over shrapnel or glass seals the dirt in: infection will slowly kill you until the bandage is off and the pieces are out"},
+    removebandage = {"Remove bandage", "Take the bandage off the limb"}
 }
 
 if WoundSystem.CAS3Locale and WoundSystem.CAS3Locale.ApplyHealthTooltips then
@@ -3597,22 +3619,43 @@ end
 
 WoundSystemActionButtonPos = WoundSystemActionButtonPos or {x = nil, y = nil}
 
-function WoundSystemDrawLimbActionPoint(limbId, state, pointPos, bX, bY, scale, dollScale, mx, my, isClicking, lastMouseState, minigameActive)
-    local actionStatus = "SHRAPNEL"
+-- which action buttons a limb gets in the wound view (drawn one under another)
+function WoundSystem.HealthGUI.HasBandageItem()
+    local ply = LocalPlayer()
+    if not IsValid(ply) then return false end
+    for _, cls in ipairs({"weapon_bandage_sh", "weapon_bigbandage_sh", "weapon_medkit_sh"}) do
+        if ply:HasWeapon(cls) then return true end
+    end
+    return false
+end
 
-    if state.customStatuses and state.customStatuses["TOURNIQUET"] then
-        actionStatus = "TOURNIQUET"
-    elseif (state.shrapnel or 0) > 0 then
-        actionStatus = "SHRAPNEL"
-    elseif state.customStatuses and state.customStatuses["SPLINTED"] then
-        actionStatus = "SPLINTED"
-    elseif state.dislocated then
-        actionStatus = "DISLOCATION"
+function WoundSystem.HealthGUI.LimbActions(state)
+    local list = {}
+    local statuses = state.customStatuses or {}
+    local shrapnel = (state.shrapnel or 0) > 0
+
+    if statuses["TOURNIQUET"] then list[#list + 1] = "TOURNIQUET" end
+    if shrapnel and not state.isBandaged then list[#list + 1] = "SHRAPNEL" end
+    if statuses["SPLINTED"] then list[#list + 1] = "SPLINTED" end
+    if state.dislocated then list[#list + 1] = "DISLOCATION" end
+
+    if state.isBandaged then
+        list[#list + 1] = "UNBANDAGE"
+    elseif ((tonumber(state.bleed) or 0) > 0.1 or shrapnel) and WoundSystem.HealthGUI.HasBandageItem() then
+        list[#list + 1] = "BANDAGE" -- only where something bleeds (a bandage over shrapnel / glass is allowed too)
     end
 
-    if actionStatus == "SHRAPNEL" and (state.shrapnel or 0) <= 0 then return end
-    if actionStatus == "DISLOCATION" and not state.dislocated then return end
+    return list
+end
 
+function WoundSystemDrawLimbActionPoint(limbId, state, pointPos, bX, bY, scale, dollScale, mx, my, isClicking, lastMouseState, minigameActive)
+    local list = WoundSystem.HealthGUI.LimbActions(state)
+    for i, status in ipairs(list) do
+        WoundSystemDrawLimbActionRow(limbId, state, status, i - 1, pointPos, bX, bY, scale, dollScale, mx, my, isClicking, lastMouseState, minigameActive)
+    end
+end
+
+function WoundSystemDrawLimbActionRow(limbId, state, actionStatus, rowIndex, pointPos, bX, bY, scale, dollScale, mx, my, isClicking, lastMouseState, minigameActive)
     local pointCfg = WoundSystemLimbUIConfig.ShrapnelPoint or {}
     local actionCfg = (pointCfg.Actions and pointCfg.Actions[actionStatus]) or {}
     local pointW = (actionCfg.Width or pointCfg.Width or pointCfg.Size or 32) * scale
@@ -3623,16 +3666,18 @@ function WoundSystemDrawLimbActionPoint(limbId, state, pointPos, bX, bY, scale, 
     local lerpT = math.Clamp(dt * (actionCfg.LerpSpeed or pointCfg.LerpSpeed or 4), 0, 1)
 
     local actionButtonPos = WoundSystemActionButtonPos
-    if not actionButtonPos.x or not actionButtonPos.y then
-        actionButtonPos.x = targetCenterX
-        actionButtonPos.y = targetCenterY
-    else
-        actionButtonPos.x = Lerp(lerpT, actionButtonPos.x, targetCenterX)
-        actionButtonPos.y = Lerp(lerpT, actionButtonPos.y, targetCenterY)
+    if rowIndex == 0 then
+        if not actionButtonPos.x or not actionButtonPos.y then
+            actionButtonPos.x = targetCenterX
+            actionButtonPos.y = targetCenterY
+        else
+            actionButtonPos.x = Lerp(lerpT, actionButtonPos.x, targetCenterX)
+            actionButtonPos.y = Lerp(lerpT, actionButtonPos.y, targetCenterY)
+        end
     end
 
-    local pointCenterX = actionButtonPos.x
-    local pointCenterY = actionButtonPos.y
+    local pointCenterX = actionButtonPos.x or targetCenterX
+    local pointCenterY = (actionButtonPos.y or targetCenterY) + (rowIndex * 50 * scale)
     local pointX = pointCenterX - (pointW * 0.5)
     local pointY = pointCenterY - (pointH * 0.5)
     local pad = 14 * scale
@@ -3669,6 +3714,13 @@ function WoundSystemDrawLimbActionPoint(limbId, state, pointPos, bX, bY, scale, 
         if actionStatus ~= "SHRAPNEL" then
             if actionStatus == "DISLOCATION" then
                 RequestDislocationMinigameStart(limbId)
+            elseif actionStatus == "BANDAGE" then
+                net.Start("WoundSystem_HudMinigame")
+                    net.WriteString("bandage")
+                    net.WriteString(limbId)
+                net.SendToServer()
+            elseif actionStatus == "UNBANDAGE" then
+                RequestRemoveLimbStatus(limbId, "BANDAGE")
             else
                 RequestRemoveLimbStatus(limbId, actionStatus)
             end

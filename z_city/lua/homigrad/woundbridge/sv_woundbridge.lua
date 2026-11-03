@@ -501,7 +501,7 @@ local B_HEAD, B_NECK = "ValveBiped.Bip01_Head1", "ValveBiped.Bip01_Neck1"
 local B_CLAV = "ValveBiped.Bip01_Spine2"
 local B_PELVIS = "ValveBiped.Bip01_Pelvis"
 
-local WoundBones, StumpBones, WoundOrder = {head = B_HEAD}, {head = B_NECK}, {"head"}
+local WoundBones, StumpBones, WoundOrder = {head = B_HEAD, thorax = B_CLAV, abdomen = "ValveBiped.Bip01_Spine1"}, {head = B_NECK}, {"head", "thorax", "abdomen"}
 
 for _, side in ipairs({"L", "R"}) do
 	local pre = "ValveBiped.Bip01_" .. side .. "_"
@@ -622,6 +622,50 @@ hook.Add("WoundSystem_BloodVomitVisual", "ZCity_WoundBridge_BloodVomit", functio
 	net.Broadcast()
 end)
 
+-----------------------------------------------------------------------------------------------------------------------
+-- BANDAGES ON THE BODY  (WoundSystem limb.isBandaged -> Z-City `bandaged_limbs` netvar, drawn by hg.RenderBandages)
+-----------------------------------------------------------------------------------------------------------------------
+local BandageBones = {
+	thorax = "ValveBiped.Bip01_Spine2", abdomen = "ValveBiped.Bip01_Spine1",
+}
+for _, side in ipairs({"L", "R"}) do
+	local pre = "ValveBiped.Bip01_" .. side .. "_"
+	BandageBones["arm_" .. side], BandageBones["forearm_" .. side], BandageBones["hand_" .. side] = pre .. "UpperArm", pre .. "Forearm", pre .. "Hand"
+	BandageBones["thigh_" .. side], BandageBones["crus_" .. side], BandageBones["foot_" .. side] = pre .. "Thigh", pre .. "Calf", pre .. "Calf"
+end
+
+function WB.SyncBandages(ply, limbs)
+	if not IsValid(ply) or type(limbs) ~= "table" then return end
+
+	local now = CurTime()
+	if (ply._wbBandNext or 0) > now then return end
+	ply._wbBandNext = now + 0.3
+
+	local set, keys = {}, {}
+	for id, l in pairs(limbs) do
+		local bone = BandageBones[id]
+		if bone and type(l) == "table" and l.isBandaged and not l.dismembered and not set[bone] then
+			set[bone] = true
+			keys[#keys + 1] = bone
+		end
+	end
+	table.sort(keys)
+	local sig = table.concat(keys, "|")
+
+	-- same bandages and nobody else replaced the list (Z-City clears it on spawn / death)
+	if ply._wbBandSig == sig and ply.bandaged_limbs == ply._wbBand then return end
+
+	ply._wbBandSig, ply._wbBand = sig, set
+	ply.bandaged_limbs = set
+	ply:SetNetVar("bandaged_limbs", set)
+
+	local rag = ply.FakeRagdoll
+	if IsValid(rag) then
+		rag.bandaged_limbs = table.Copy(set)
+		rag:SetNetVar("bandaged_limbs", rag.bandaged_limbs)
+	end
+end
+
 function WB.Think(owner, org, dt)
 	if not IsValid(owner) or not owner:IsPlayer() or not owner:Alive() then return end
 
@@ -630,6 +674,7 @@ function WB.Think(owner, org, dt)
 	if not body then return end
 
 	WB.SyncWounds(owner, org, WB.GetLimbs(owner))
+	WB.SyncBandages(owner, WB.GetLimbs(owner))
 
 	org.timeValue = dt
 
@@ -799,6 +844,7 @@ hook.Add("PlayerSpawn", "ZCity_WoundBridge_Spawn", function(ply)
 	ply._WBGetUpQueued = nil
 	ply._WBLimbSnapshot = nil
 	ply._wbWoundSig, ply._wbWounds, ply._wbArterial, ply._wbWoundGeo, ply._wbWoundNext = nil, nil, nil, nil, nil
+	ply._wbBandSig, ply._wbBand, ply._wbBandNext = nil, nil, nil
 end)
 
 -----------------------------------------------------------------------------------------------------------------------
@@ -1313,3 +1359,45 @@ function WB.SwepHeal(swep, ent, mode, bone)
 
 	return true
 end
+
+-----------------------------------------------------------------------------------------------------------------------
+-- WOUND VIEW (HUD) MINIGAMES WITH A CARRIED ITEM
+--   The wound view asks for a minigame that needs a medical item: the Z-City item the player carries is used up exactly
+--   as when it is used from the hands (same specs, same smooth partial use).
+-----------------------------------------------------------------------------------------------------------------------
+local HudBandagePriority = {weapon_bandage_sh = 1, weapon_bigbandage_sh = 2, weapon_medkit_sh = 3}
+
+function WB.StartHud(ply, kind, limbId)
+	if not WB.IsBridged(ply) or not WB.cvMinigame:GetBool() then return false end
+
+	local limbs = WB.GetLimbs(ply)
+	local l = limbs and limbs[limbId]
+	if type(l) ~= "table" or l.dismembered then return false end
+
+	if kind == "bandage" then
+		-- only where something bleeds (a bandage over shrapnel / glass is allowed: it will infect, see WoundSystem)
+		if l.isBandaged then return false end
+		if (tonumber(l.bleed) or 0) <= 0.1 and (tonumber(l.shrapnel) or 0) <= 0 then return false end
+
+		local best, bestSpec, bestIdx, bestRank
+		for _, w in ipairs(ply:GetWeapons()) do
+			local rank = HudBandagePriority[w:GetClass()]
+			if rank and (not bestRank or rank < bestRank) then
+				local idx = 1
+				local spec = (w:GetClass() == "weapon_medkit_sh") and WB.MedkitModes[1] or WB.SwepSpecs[w:GetClass()]
+				if spec and spec.kind == "bandage" and Remaining(w, idx) > 0 then
+					best, bestSpec, bestIdx, bestRank = w, spec, idx, rank
+				end
+			end
+		end
+
+		if not best then return false end
+		return StartMinigame(best, bestSpec, bestIdx, ply, limbId) ~= nil
+	end
+
+	return false
+end
+
+hook.Add("WoundSystem_HudMinigame", "ZCity_WoundBridge_Hud", function(ply, kind, limbId)
+	WB.StartHud(ply, kind, limbId)
+end)

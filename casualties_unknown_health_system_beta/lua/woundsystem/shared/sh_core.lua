@@ -43,6 +43,7 @@ WoundSystem.NetStrings = WoundSystem.NetStrings or {
     "WoundSystem_UseMedicalItem",
     "WoundSystem_UseWorldMedicalItem",
     "WoundSystem_RemoveLimbStatus",
+    "WoundSystem_HudMinigame",
     "WoundSystem_DismemberVisuals",
     "WoundSystem_ResetDismemberVisuals",
     "WoundSystem_BloodVomit",

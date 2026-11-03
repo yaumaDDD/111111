@@ -4651,6 +4651,7 @@ net.Receive("WoundSystem_ShrapnelStart", function(_, ply)
     local state = GetLimbState(ply, limbId)
     if not state then return end
     if state.shrapnel <= 0 then return end
+    if state.isBandaged then return end -- the bandage has to come off first
 
     local hasTweezers = ShrapnelItemHasTweezers(ply, slotIdx)
     if hasTweezers and not ConsumeToolDurability(ply, slotIdx, 1) then return end
@@ -6782,10 +6783,21 @@ local function LimbPhysiologyTick(dt)
                 end
             end
 
+            -- A bandage over shrapnel / glass seals the dirt in: an infection nothing stops (it spreads and slowly kills
+            -- through sepsis) until the bandage is taken off and the shrapnel is pulled out
+            local sealedDirt = state.isBandaged and (state.shrapnel or 0) > 0
+            if sealedDirt then
+                state.sealedInfection = true
+                state.infectionSpeed = math.max(state.infectionSpeed or 0, 2)
+            elseif state.sealedInfection then
+                state.sealedInfection = nil
+                state.infectionSpeed = ((state.shrapnel or 0) > 0) and 0.5 or -1.5
+            end
+
             -- Infection progression
             if state.infection > 0 or state.infectionSpeed > 0 then
                 local immunityMod = body.immunityMult or 1
-                if state.disinfectTime > 0 then
+                if state.disinfectTime > 0 and not sealedDirt then
                     immunityMod = immunityMod - 1.7
                 end
 
@@ -8383,6 +8395,18 @@ net.Receive("WoundSystem_RemoveLimbStatus", function(_, ply)
 
     local limbId = net.ReadString()
     local statusId = WoundSystem.NormalizeItemId(net.ReadString())
+    if statusId == "BANDAGE" then
+        -- take the bandage off (needed to get at shrapnel / glass under it)
+        local bandState = GetLimbState(ply, limbId)
+        if bandState and bandState.isBandaged then
+            local tq = bandState.customStatuses and bandState.customStatuses["TOURNIQUET"]
+            Fn.ClearLimbBandage(bandState)
+            if tq then bandState.blockedBleeding = true end
+            SendLimbUpdate(ply, limbId, true)
+        end
+        return
+    end
+
     if statusId ~= "SPLINTED" and statusId ~= "TOURNIQUET" then return end
 
     local state = GetLimbState(ply, limbId)
@@ -8445,6 +8469,19 @@ net.Receive("WoundSystem_RemoveLimbStatus", function(_, ply)
     SendLimbUpdate(ply, limbId, true)
 end)
 
+
+-- Wound view (HUD) asks for a minigame that needs a medical item the player carries (a Z-City SWEP): the integration
+-- (hg.WoundBridge) answers the hook and opens the minigame with that item.
+net.Receive("WoundSystem_HudMinigame", function(_, ply)
+    if not WoundSystemHealthEnabled() then return end
+    if not IsValid(ply) or not ply:Alive() then return end
+
+    local kind = string.lower(net.ReadString())
+    local limbId = net.ReadString()
+    if not GetLimbState(ply, limbId) then return end
+
+    hook.Run("WoundSystem_HudMinigame", ply, kind, limbId)
+end)
 
 WoundSystem = WoundSystem or {}
 
