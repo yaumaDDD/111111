@@ -2146,38 +2146,39 @@ local function ProcessImpactDamage(ply, limb, force)
     -- body.shock += force * 0.05 / armorReduction
     Fn.AddBodyShock(body, (force * 0.05) / armorReduction)
 
-    -- skinHealth checks
-    local muscleFactor = (state.muscle < 50) and 0.632 or 1.0
-    local skinCheckThreshold = math.Rand(jumpSpeed * 1.55, jumpSpeed * 4.4) * muscleFactor
-    if force > skinCheckThreshold then
-        local skinDamage = (force * 0.33) / armorReduction
-        state.skin = math.Clamp(state.skin - skinDamage, 0, 100)
+    -- Z-City: a fall / crush (DMG_FALL, DMG_CRUSH) makes no blood and no wound by itself (dmgBlood = 0): the only result is the
+    -- bone (sv_bone.lua legs()/arms()). So an impact never touches skin / bleeding here (cuts of rough surfaces and glass
+    -- are separate: hg.WoundBridge.SurfaceCut), it only breaks or dislocates the limb.
+    local extremity = not Fn.IsCriticalLimb(limb)
+    local armGroup = string.find(limb, "^arm_") or string.find(limb, "^forearm_") or string.find(limb, "^hand_")
 
-        if force > jumpSpeed * 2.6 then
-            local randBleed = math.Rand(state.bleed, (100 - state.skin) * 0.4)
-            state.bleed = math.max(state.bleed, randBleed)
-            Fn.ClearLimbBandage(state)
-        end
-    end
-
-    -- dislocation check
+    -- bone damage = how far the force is past the (random) fracture threshold of the limb
     local structuralMultiplier = math.Clamp(((state.muscle or 100) * 0.01) + 0.5, 0, 1)
-    local dislocateThreshold = math.Rand(jumpSpeed * 3.5, jumpSpeed * 5.0) * structuralMultiplier
-    if force > dislocateThreshold and limb ~= "head" then -- (no jaw dislocation)
-        ApplyDislocation(ply, limb, state)
-        state.pain = math.Clamp(state.pain + math.Rand(40, 80), 0, 100)
-        body.adrenaline = math.Clamp((body.adrenaline or 0) + 75, 0, 100)
-    end
+    local boneDamage = force / (math.Rand(jumpSpeed * 4.0, jumpSpeed * 7.0) * structuralMultiplier)
 
-    -- fracture check
-    local fractureThreshold = math.Rand(jumpSpeed * 4.0, jumpSpeed * 7.0) * structuralMultiplier
-    if force > fractureThreshold then
+    if extremity then
+        -- Z-City legs() / arms(): below 0.7 (arms 0.6) nothing; from there a blunt hit dislocates; at 1 or more it breaks
+        -- the bone (2 of 3) or dislocates it (1 of 3)
+        local minDamage = armGroup and 0.6 or 0.7
+        if boneDamage >= minDamage and not state.broken then
+            if boneDamage >= 1 and math.random(3) ~= 1 then
+                ApplyFracture(ply, limb, state)
+                state.pain = math.Clamp(state.pain + 55, 0, 100) -- Z-City: painadd + 55
+                body.adrenaline = math.Clamp((body.adrenaline or 0) + 80, 0, 100)
+                Fn.AddBodyShock(body, 10)
+            elseif not state.dislocated then
+                ApplyDislocation(ply, limb, state)
+                state.pain = math.Clamp(state.pain + 35, 0, 100) -- Z-City: painadd + 35
+                body.adrenaline = math.Clamp((body.adrenaline or 0) + 40, 0, 100)
+                Fn.AddBodyShock(body, 5)
+            end
+        end
+    elseif boneDamage >= 1 and limb ~= "head" and not state.broken then
+        -- ribs / pelvis: a broken bone, internal bleeding (no visible blood)
         ApplyFracture(ply, limb, state)
-        state.skin = math.Clamp(state.skin - 33, 0, 100)
-        state.bleed = math.Clamp(state.bleed + math.Rand(0, 20), 0, 100)
-        state.pain = math.Clamp(state.pain + math.Rand(60, 100), 0, 100)
+        state.pain = math.Clamp(state.pain + 55, 0, 100)
         body.adrenaline = math.Clamp((body.adrenaline or 0) + 80, 0, 100)
-        body.internalBleeding = (body.internalBleeding or 0) + (Fn.IsCriticalLimb(limb) and 34 or 10)
+        body.internalBleeding = (body.internalBleeding or 0) + 34
     end
 
     -- internal bleeding check for vitals/head
