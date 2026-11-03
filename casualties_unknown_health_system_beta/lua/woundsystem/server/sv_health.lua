@@ -5183,15 +5183,6 @@ net.Receive("WoundSystem_DislocationInput", function(_, ply)
     state.dislocationTimer = session.dislocationTimer
 
     if session.dislocationTimer < WoundSystem.Health.Constants.DislocationSuccessTimer then
-        -- the bone is back in place: the bridge (Z-City) rolls whether the joint really stays reduced
-        if hook.Run("WoundSystem_DislocationReduce", ply, session.limbId, state) == true then
-            session.dislocationTimer = state.dislocated and (state.dislocationTimer or 100) or 0
-            SendLimbUpdate(ply, session.limbId, true)
-            SendDislocationState(ply, session)
-            CloseDislocationSession(ply, "complete")
-            return
-        end
-
         state.dislocated = false
         state.dislocationTimer = 0
         session.dislocationTimer = 0
