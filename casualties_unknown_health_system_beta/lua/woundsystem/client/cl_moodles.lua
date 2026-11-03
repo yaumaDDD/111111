@@ -116,10 +116,7 @@ local function Round(value)
     return math.Round and math.Round(value) or math.floor((value or 0) + 0.5)
 end
 
-local function DeathScreenActive()
-    if WoundSystemDeathScreenActive == true then return true end
-    if WoundSystem and WoundSystem.HealthGUI and WoundSystem.HealthGUI.DeathScreenActive == true then return true end
-
+local function LocalPlayerDead()
     local ply = LocalPlayer()
     return IsValid(ply) and not ply:Alive()
 end
@@ -1048,7 +1045,7 @@ local function AddResult(out, def, ctx, result)
 end
 
 local function BuildMoodles()
-    if DeathScreenActive() then return {} end
+    if LocalPlayerDead() then return {} end
 
     local ctx = GetContext()
     if not IsValid(ctx.ply) or not ctx.ply:Alive() then return {} end
@@ -1299,7 +1296,7 @@ hook.Add("Think", "WoundSystem_MoodlesThink", function()
     end
 
     if not cvEnabled:GetBool() then return end
-    if DeathScreenActive() then
+    if LocalPlayerDead() then
         ClearActiveMoodles()
         return
     end
@@ -1317,7 +1314,7 @@ hook.Add("PostDrawHUD", "WoundSystem_MoodlesPaint", function()
     end
 
     if not cvEnabled:GetBool() then return end
-    if DeathScreenActive() then
+    if LocalPlayerDead() then
         table.Empty(Moodles.Layout)
         return
     end

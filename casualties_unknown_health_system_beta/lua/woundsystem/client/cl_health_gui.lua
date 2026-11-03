@@ -110,28 +110,7 @@ local function PaddedMaterial(matPath, flags)
     return mat
 end
 
-local DeathScreen = {
-    isDead = false,
-    deathTime = 0,
-    deathType = "normal",
-    deathScreenStarted = false,
-    deathScreenImageDelay = 1,
-    deathEcgHoldTime = 1,
-    clickDebounce = false
-}
 local spawnVisualGraceUntil = CurTime() + 3
-
-WoundSystem.HealthGUI.DeathScreenActive = false
-WoundSystemDeathScreenActive = false
-
-local function SetDeathScreenActive(active)
-    DeathScreen.isDead = active == true
-    if not DeathScreen.isDead then
-        DeathScreen.deathScreenStarted = false
-    end
-    WoundSystem.HealthGUI.DeathScreenActive = DeathScreen.isDead
-    WoundSystemDeathScreenActive = DeathScreen.isDead
-end
 
 WoundSystem.HealthGUI.LifecycleSeq = WoundSystem.HealthGUI.LifecycleSeq or 0
 WoundSystem.HealthGUI.IgnoreLifecycleAtOrBefore = WoundSystem.HealthGUI.IgnoreLifecycleAtOrBefore or 0
@@ -257,11 +236,6 @@ function WoundSystem.HealthGUI.DelayedRespawnCursorRelease(reason)
     local function release()
         local ply = LocalPlayer()
         if IsValid(ply) and not ply:Alive() then return end
-        if IsValid(ply) and ply:Alive() and DeathScreen.isDead then
-            SetDeathScreenActive(false)
-            DeathScreen.deathScreenStarted = false
-            DeathScreen.clickDebounce = false
-        end
         if WoundSystemHealthHUDOpen then return end
         if WoundSystemWorldDrag and WoundSystemWorldDrag.active then return end
         if WoundSystemIsAnyWoundMinigameActive and WoundSystemIsAnyWoundMinigameActive() then return end
@@ -275,29 +249,6 @@ function WoundSystem.HealthGUI.DelayedRespawnCursorRelease(reason)
     timer.Simple(0.25, release)
     timer.Simple(0.75, release)
 end
-
-net.Receive("WoundSystem_PlayerDied", function()
-    if not WoundSystemClientEnabled() then return end
-
-    local incomingDeathType = net.ReadString()
-    local lifecycleSeq = WoundSystem.HealthGUI.ReadOptionalUInt(24, nil)
-    if WoundSystem and WoundSystem.DebugDeath then
-        print("[WoundSystem Death] Client received WoundSystem_PlayerDied type=", incomingDeathType, "lifecycleSeq=", tostring(lifecycleSeq), "localAlive=", tostring(LocalPlayer() and LocalPlayer():Alive()))
-    end
-    if WoundSystem.HealthGUI.ShouldIgnoreLifecycleMessage(lifecycleSeq, true) then return end
-
-    local alreadyShowingDeathScreen = DeathScreen.isDead and DeathScreen.deathScreenStarted
-    SetDeathScreenActive(true)
-    if not alreadyShowingDeathScreen then
-        DeathScreen.deathTime = CurTime()
-    end
-    DeathScreen.deathType = incomingDeathType
-    DeathScreen.deathScreenStarted = alreadyShowingDeathScreen
-    DeathScreen.clickDebounce = false
-    
-    -- Free the cursor so the player can click the screen
-    WoundSystem.HealthGUI.SetScreenClickerOwned(true, "death_screen")
-end)
 
 local function SetGuiMaterial(mat)
     ActivePaddedMaterial = PaddedMaterialInfo[mat]
@@ -687,9 +638,6 @@ local Mat = {
     screenSmallStatic = PaddedMaterial(path .. "screen/screensmallstatic.png"),
     depressionOverlay = PaddedMaterial(path .. "screen/depressionoverlay.png"),
     criticalPiece = PaddedMaterial(path .. "screen/criticalpanelpiece.png"),
-    newdeath = PaddedMaterial(path .. "screen/newdeath.png"),
-    newdeathviolent = PaddedMaterial(path .. "screen/newdeathviolent.png"),
-    newdeathdrowning = PaddedMaterial(path .. "screen/newdeathdrowning.png"),
     resultspage = PaddedMaterial(path .. "screen/resultspage.png"),
     barBrain = PaddedMaterial(path .. "screen/barbrain.png"),
     barBlood = PaddedMaterial(path .. "screen/barblood.png"),
@@ -744,7 +692,6 @@ hook.Add("PlayerSpawn", "WoundSystem_RespawnEyeSide", function(ply)
     -- Crucial check: Only change the variable if the spawning player is YOU
     if ply == LocalPlayer() then
         WoundSystem.HealthGUI.NoteLocalRespawn()
-        SetDeathScreenActive(false)
         spawnVisualGraceUntil = CurTime() + 3
         if WoundSystemScreenFX and WoundSystemScreenFX.ResetVisualState then
             WoundSystemScreenFX.ResetVisualState()
@@ -2245,9 +2192,7 @@ hook.Add("Think", "ToggleHUDInput", function()
 
     if GUIState.hudOpen and (not modEnabled or isUnconscious or not isAlive) then
         GUIState.hudOpen = false
-        if not DeathScreen.isDead then
-            WoundSystem.HealthGUI.SetScreenClickerOwned(false, "hud_forced_closed")
-        end
+        WoundSystem.HealthGUI.SetScreenClickerOwned(false, "hud_forced_closed")
         CloseWoundMinigames("hud_closed")
     end
 
@@ -2291,7 +2236,7 @@ hook.Add("Think", "ToggleHUDInput", function()
 
     if GUIState.hudOpen and not WoundSystem.HealthGUI.IsExternalMenuOpen() then
         WoundSystem.HealthGUI.SetScreenClickerOwned(true, "hud_open_hold")
-    elseif not DeathScreen.isDead and not (WoundSystemWorldDrag and WoundSystemWorldDrag.active)
+    elseif not (WoundSystemWorldDrag and WoundSystemWorldDrag.active)
         and not (WoundSystemIsAnyWoundMinigameActive and WoundSystemIsAnyWoundMinigameActive()) then
         -- (a minigame started by a Z-City SWEP owns the cursor without the health HUD being open)
         WoundSystem.HealthGUI.SetScreenClickerOwned(false, "hud_closed_hold")
@@ -2432,16 +2377,7 @@ hook.Add("Think", "WoundSystem_ScreenClickerWatchdog", function()
     if not (WoundSystem and WoundSystem.HealthGUI) then return end
 
     local ply = LocalPlayer()
-    if WoundSystemClientEnabled() and IsValid(ply) and ply:Alive() and DeathScreen.isDead then
-        SetDeathScreenActive(false)
-        DeathScreen.deathScreenStarted = false
-        DeathScreen.clickDebounce = false
-        WoundSystem.HealthGUI.ForceReleaseScreenClicker(false, "watchdog_alive_deathscreen")
-        return
-    end
-
-    local shouldOwn = DeathScreen.isDead
-        or GUIState.hudOpen
+    local shouldOwn = GUIState.hudOpen
         or WoundSystemHealthHUDOpen
         or (WoundSystemWorldDrag and WoundSystemWorldDrag.active)
         or (WoundSystemIsAnyWoundMinigameActive and WoundSystemIsAnyWoundMinigameActive())
@@ -2475,7 +2411,6 @@ local function ClickerDebugStatus()
         "cursor=" .. tostring(vgui.CursorVisible()),
         "healthHUD=" .. tostring(WoundSystemHealthHUDOpen == true),
         "hudOpen=" .. tostring(GUIState.hudOpen == true),
-        "deadScreen=" .. tostring(DeathScreen.isDead == true),
         "worldDrag=" .. tostring(WoundSystemWorldDrag and WoundSystemWorldDrag.active or false),
         "minigame=" .. tostring(minigameActive),
         "gameUI=" .. tostring(gui.IsGameUIVisible()),
@@ -3265,24 +3200,16 @@ local UnconsciousFX = {
     SmoothedPieRatio = 0
 }
 
-local function HasDeathScreenVisualState()
-    return DeathScreen.isDead
-        or DeathScreen.deathScreenStarted
-        or DeathScreen.clickDebounce
-        or WoundSystemDeathScreenActive == true
-        or (WoundSystem.HealthGUI and WoundSystem.HealthGUI.DeathScreenActive == true)
-        or (UnconsciousFX.SmoothedBlackoutAlpha or 0) > 0.01
+local function HasUnconsciousVisualState()
+    return (UnconsciousFX.SmoothedBlackoutAlpha or 0) > 0.01
         or (UnconsciousFX.SmoothedDeathFade or 0) > 0.001
         or (UnconsciousFX.SmoothedUiAlpha or 0) > 0.001
         or (UnconsciousFX.CircleAlpha or 0) > 0.001
 end
 
-local function ClearDeathScreenVisualState()
-    local hadVisualState = HasDeathScreenVisualState()
+local function ClearUnconsciousVisualState()
+    local hadVisualState = HasUnconsciousVisualState()
 
-    SetDeathScreenActive(false)
-    DeathScreen.deathScreenStarted = false
-    DeathScreen.clickDebounce = false
     UnconsciousFX.SmoothedBlackoutAlpha = 0
     UnconsciousFX.SmoothedDeathFade = 0
     UnconsciousFX.SmoothedUiAlpha = 0
@@ -3354,35 +3281,6 @@ local function DrawUnconsciousEcg(cx, cy, ecgW, ecgH, color)
     end
 end
 
-local function DrawDeathBackgroundVisuals(elapsed)
-    local scrW, scrH = ScrW(), ScrH()
-    local blackAlpha = math.Clamp((elapsed or 0) / 0.25, 0, 1) * 255
-
-    surface.SetDrawColor(0, 0, 0, blackAlpha)
-    surface.DrawRect(0, 0, scrW, scrH)
-
-    local vignetteAlpha = math.Clamp(blackAlpha, 0, 220)
-    if vignetteAlpha > 0 and Mat.unconsciousVignette and not Mat.unconsciousVignette:IsError() then
-        surface.SetDrawColor(255, 255, 255, vignetteAlpha)
-        surface.SetMaterial(Mat.unconsciousVignette)
-        surface.DrawTexturedRect(0, 0, scrW, scrH)
-    end
-end
-
-local function DrawDeathTopEcg(elapsed)
-    elapsed = elapsed or 0
-    if elapsed < DeathScreen.deathScreenImageDelay or elapsed > DeathScreen.deathScreenImageDelay + DeathScreen.deathEcgHoldTime then return end
-
-    local fadeOut = 1 - math.Clamp((elapsed - DeathScreen.deathScreenImageDelay) / DeathScreen.deathEcgHoldTime, 0, 1)
-    if fadeOut <= 0 then return end
-
-    local scrH = ScrH()
-    local cx, cy = ScrW() / 2, scrH / 2
-    local radius = scrH * 0.1875
-    local ecgW, ecgH = radius * 1.4 + 20, radius * 0.6
-    DrawUnconsciousEcg(cx, cy, ecgW, ecgH, Color(255, 255, 255, 220 * fadeOut))
-end
-
 hook.Add("PlayerSpawn", "WoundSystem_ResetSpawnVisualState", function(ply)
     if hg and hg.override and hg.override[ply] then return end -- Z-City fake-ragdoll get-up, not a real respawn
     if ply ~= LocalPlayer() then return end
@@ -3413,15 +3311,10 @@ hook.Add("PlayerSpawn", "WoundSystem_ResetSpawnVisualState", function(ply)
     WoundSystem.HealthGUI.DelayedRespawnCursorRelease("spawn_visual_state")
 end)
 
-net.Receive("WoundSystem_ClearDeathScreen", function()
-    ClearDeathScreenVisualState()
-    WoundSystem.HealthGUI.ForceReleaseScreenClicker(false, "clear_death_screen")
-end)
-
 local function DrawConsciousnessBlackout()
     if not WoundSystemClientEnabled() then
-        if HasDeathScreenVisualState() then
-            ClearDeathScreenVisualState()
+        if HasUnconsciousVisualState() then
+            ClearUnconsciousVisualState()
         end
         return
     end
@@ -3441,12 +3334,7 @@ local function DrawConsciousnessBlackout()
     local lowConsciousThreshold = 70
     local unconsciousBlackAlpha = 0.965 * 255
     local isDead = not IsValid(ply) or not ply:Alive()
-    local isUnconscious = not DeathScreen.isDead and ((CardioState.unconscious or false) or (IsValid(ply) and ply:GetNWBool("WoundSystemUnconscious", false)))
-
-    -- Persist the blackout through the actual death so there is no visual gap
-    if DeathScreen.isDead then
-        isUnconscious = true
-    end
+    local isUnconscious = (CardioState.unconscious or false) or (IsValid(ply) and ply:GetNWBool("WoundSystemUnconscious", false))
 
     local consciousness = CardioState.consciousness or 100
     local brainHealth = CardioState.brainHealth or 100
@@ -3466,11 +3354,7 @@ local function DrawConsciousnessBlackout()
     if isUnconscious or consciousness < unconsciousThreshold then
         targetAlpha = math.max(targetAlpha, unconsciousBlackAlpha)
     end
-    if DeathScreen.isDead then
-        targetAlpha = 255
-    end
-
-    UnconsciousFX.SmoothedBlackoutAlpha = SmoothVisualValue(UnconsciousFX.SmoothedBlackoutAlpha, targetAlpha, DeathScreen.isDead and 1.15 or 0.72)
+    UnconsciousFX.SmoothedBlackoutAlpha = SmoothVisualValue(UnconsciousFX.SmoothedBlackoutAlpha, targetAlpha, 0.72)
 
     if isBrainDying and brainHealth <= 1.0 then
         UnconsciousFX.SmoothedDeathFade = SmoothVisualValue(UnconsciousFX.SmoothedDeathFade, 1, 1.05)
@@ -3481,13 +3365,11 @@ local function DrawConsciousnessBlackout()
     local finalBlackoutAlpha = math.max(UnconsciousFX.SmoothedBlackoutAlpha, UnconsciousFX.SmoothedDeathFade * 255)
 
     if finalBlackoutAlpha > 0 then
-        if not (DeathScreen.isDead and DeathScreen.deathScreenStarted) then
-            surface.SetDrawColor(0, 0, 0, finalBlackoutAlpha)
-            surface.DrawRect(0, 0, ScrW(), ScrH())
-        end
+        surface.SetDrawColor(0, 0, 0, finalBlackoutAlpha)
+        surface.DrawRect(0, 0, ScrW(), ScrH())
     end
 
-    local uiShouldShow = isUnconscious and not DeathScreen.isDead and not isGrace
+    local uiShouldShow = isUnconscious and not isGrace
 
     if uiShouldShow then
         UnconsciousFX.SmoothedUiAlpha = SmoothVisualValue(UnconsciousFX.SmoothedUiAlpha, 1, 0.75)
@@ -4329,11 +4211,7 @@ function WoundSystem.HealthGUI.ResetLocalRespawnInput(reason)
         ForceClearRagdollCameraState()
     end
 
-    if ClearDeathScreenVisualState then
-        ClearDeathScreenVisualState()
-    else
-        SetDeathScreenActive(false)
-    end
+    ClearUnconsciousVisualState()
 
     if input then
         GUIState.lastMouseState = input.IsMouseDown and input.IsMouseDown(MOUSE_LEFT) or false
@@ -4707,99 +4585,13 @@ hook.Add("RenderScreenspaceEffects", "WoundSystem_ChromaticAberration", function
     end
 end, HOOK_HIGH)
 
-hook.Add("PlayerSpawn", "WoundSystem_ResetDeathScreen", function(ply)
+hook.Add("PlayerSpawn", "WoundSystem_ResetLocalRespawnInput", function(ply)
     if hg and hg.override and hg.override[ply] then return end -- Z-City fake-ragdoll get-up, not a real respawn
     if ply == LocalPlayer() then
         WoundSystem.HealthGUI.NoteLocalRespawn()
         WoundSystem.HealthGUI.ResetLocalRespawnInput("respawn")
     end
 end)
-
-hook.Add("HUDPaint", "WoundSystem_DeathScreenDisplay", function()
-    if not WoundSystemClientEnabled() then
-        if HasDeathScreenVisualState() then
-            ClearDeathScreenVisualState()
-        end
-        return
-    end
-
-    local ply = LocalPlayer()
-    if IsValid(ply) and ply:Alive() and DeathScreen.isDead then
-        ClearDeathScreenVisualState()
-        WoundSystem.HealthGUI.ForceReleaseScreenClicker(false, "deathscreen_alive_clear")
-        return
-    end
-
-    if IsValid(ply) and not ply:Alive() and not DeathScreen.isDead then
-        SetDeathScreenActive(true)
-        DeathScreen.deathTime = CurTime()
-        DeathScreen.deathType = "normal"
-        DeathScreen.deathScreenStarted = true
-        DeathScreen.clickDebounce = false
-        UnconsciousFX.SmoothedBlackoutAlpha = 255
-        WoundSystem.HealthGUI.SetScreenClickerOwned(true, "deathscreen_dead_fallback")
-    end
-
-    if not DeathScreen.isDead then return end
-    if not DeathScreen.deathScreenStarted then
-        if UnconsciousFX.SmoothedBlackoutAlpha < (0.965 * 255) and CurTime() - DeathScreen.deathTime < 5 then
-            return
-        end
-
-        DeathScreen.deathScreenStarted = true
-        DeathScreen.deathTime = CurTime()
-    end
-
-    local elapsed = CurTime() - DeathScreen.deathTime
-    local scrW, scrH = ScrW(), ScrH()
-
-    DrawDeathBackgroundVisuals(elapsed)
-
-    -- 1. Quick transition before the actual death screen material fades in.
-    if elapsed < DeathScreen.deathScreenImageDelay then
-        DrawDeathTopEcg(elapsed)
-        return
-    end
-
-    -- 2. Slowly show the true death screen over 5 seconds
-    local fadeElapsed = elapsed - DeathScreen.deathScreenImageDelay
-    local screenAlpha = math.Clamp(fadeElapsed / 5, 0, 1) * 255
-
-    -- Determine which material to draw
-    local activeMat = Mat.newdeath
-    if DeathScreen.deathType == "violent" then
-        activeMat = Mat.newdeathviolent
-    elseif DeathScreen.deathType == "drowning" then
-        activeMat = Mat.newdeathdrowning
-    end
-
-    if activeMat and not activeMat:IsError() then
-        -- Leverage your PaddedMaterial wrapper configuration
-        WoundSystem.Client.SetGuiMaterial(activeMat)
-        surface.SetDrawColor(255, 255, 255, screenAlpha)
-        
-        -- Stretches to completely cover the screen space
-        WoundSystem.Client.DrawRectInt(0, 0, scrW, scrH)
-    end
-
-    DrawDeathTopEcg(elapsed)
-
-    -- 3. Click anywhere on the death screen to trigger respawn
-    if input.IsMouseDown(MOUSE_LEFT) then
-        -- Adding a brief 1-second delay from death to prevent instant accidental click-throughs
-        if not DeathScreen.clickDebounce and fadeElapsed >= 1.0 then 
-            DeathScreen.clickDebounce = true
-            SetDeathScreenActive(false)
-            WoundSystem.HealthGUI.SetScreenClickerOwned(false, "deathscreen_think_not_dead")
-            
-            net.Start("WoundSystem_PlayerRespawnRequest")
-            net.SendToServer()
-        end
-    else
-        DeathScreen.clickDebounce = false
-    end
-end, HOOK_HIGH)
-
 
 -- ==========================================
 -- SETUP

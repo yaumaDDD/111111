@@ -24,7 +24,6 @@ local serverFiles = {
     "woundsystem/server/health/sv_cas3_bodyfeel.lua",
     "woundsystem/server/sv_health.lua",
     "woundsystem/server/sv_brain_effects.lua",
-    "woundsystem/server/sv_deathscreen.lua",
     "woundsystem/server/sv_sounds.lua"
 }
 
