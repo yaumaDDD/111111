@@ -267,7 +267,7 @@ function CAS3.FinishVomit(ply, body)
     end
 
     source = IsValid(source) and source or ply
-    source:EmitSound(math.random(1, 2) == 1 and "vomit1.ogg" or "vomit2a.ogg", 70, 100, 0.9)
+    source:EmitSound("vomit/vomit5.mp3") -- Z-City vomit sound
 
     AddClamped(body, "happiness", -2.5, -100, 100, 0)
     AddClamped(body, "sicknessAmount", -(8 + power * 5), 0, 100, 0)
@@ -278,10 +278,6 @@ function CAS3.FinishVomit(ply, body)
 
     if body.sleeping and (body.sleepingPillAmount or 0) <= 0 then
         body.sleeping = false
-    end
-
-    if WoundSystem.TalkerSayLine then
-        WoundSystem.TalkerSayLine(ply, "vomit", nil, true)
     end
 
     if SendCardioUpdate then
@@ -439,9 +435,6 @@ function CAS3.RunBrainSymptomExtras(ply, body, brainHealth, rollFn)
 
     if rollFn(brainHealth, 1) and math.Rand(0, 1) < 0.75 then
         ply:SetNWFloat("WoundSystemBrainShakeUntil", math.max(ply:GetNWFloat("WoundSystemBrainShakeUntil", 0), CurTime() + 2.25))
-        if WoundSystem.TalkerSayLine then
-            WoundSystem.TalkerSayLine(ply, "hitbycreature", nil, true)
-        end
     end
 
     if rollFn(brainHealth, 1) and math.Rand(0, 1) < 0.06 then
@@ -451,8 +444,5 @@ function CAS3.RunBrainSymptomExtras(ply, body, brainHealth, rollFn)
     if rollFn(brainHealth, 1) then
         CAS3.DropHeldThings(ply, "brain")
         body.specialCryingUntil = math.max(body.specialCryingUntil or 0, CurTime() + 2)
-        if WoundSystem.TalkerSayLine then
-            WoundSystem.TalkerSayLine(ply, "braindamaged", nil, true)
-        end
     end
 end

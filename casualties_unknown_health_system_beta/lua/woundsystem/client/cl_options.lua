@@ -14,15 +14,7 @@ local function EnsureClientConVar(name, default, help, min, max)
     CreateClientConVar(name, tostring(default), true, false, help or "", min, max)
 end
 
-CreateClientConVar("woundsys_pain_sounds_enabled", "1", true, true, "Enable CAS-style pain vocalizations.", 0, 1)
-CreateClientConVar("woundsys_death_sounds_enabled", "1", true, true, "Enable death vocalization sounds.", 0, 1)
-CreateClientConVar("woundsys_growl_sounds_enabled", "1", true, true, "Enable unhappy growl sounds.", 0, 1)
 CreateClientConVar("woundsys_self_talk_enabled", "1", true, true, "Let your character automatically say quoted C:U-style self-talk lines in chat.", 0, 1)
-EnsureClientConVar("woundsys_music_enabled", "1", "Enable the CAS3-style WoundSystem music manager.", 0, 1)
-EnsureClientConVar("woundsys_music_volume", "0.45", "CAS3 music song volume.", 0, 1)
-EnsureClientConVar("woundsys_music_drone_volume", "1", "CAS3 medical drone volume.", 0, 1)
-EnsureClientConVar("woundsys_music_sadness_distortion", "1", "Approximate CAS3 sadness mixer distortion.", 0, 1)
-EnsureClientConVar("woundsys_tinnitus_volume", "1.0", "Volume multiplier for deafened tinnitus ringing SFX.", 0, 2)
 if not GetConVar("woundsys_face_expressions_enabled") then
     CreateClientConVar("woundsys_face_expressions_enabled", "1", true, false, "Enable WoundSystem flex-based facial expressions.", 0, 1)
 end
@@ -62,41 +54,11 @@ local CLIENT_PRESET_CVARS = {
     "woundsys_pain_shader_enabled",
     "woundsys_pain_shader_strength",
     "woundsys_pain_shader_distortion",
-    "woundsys_moodles_enabled",
-    "woundsys_moodles_scale",
-    "woundsys_moodles_icon_size",
-    "woundsys_moodles_gap",
-    "woundsys_moodles_columns",
-    "woundsys_moodles_offset_x",
-    "woundsys_moodles_offset_y",
-    "woundsys_moodles_anchor",
-    "woundsys_moodles_always_show_side",
-    "woundsys_moodles_side_on_cursor",
-    "woundsys_moodles_max_main",
-    "woundsys_moodles_update_rate",
-    "woundsys_moodles_tooltips",
-    "woundsys_moodles_medical_chip",
-    "woundsys_moodles_disabled",
     "woundsys_audio_master",
-    "woundsys_music_enabled",
-    "woundsys_music_volume",
-    "woundsys_music_drone_volume",
-    "woundsys_music_sadness_distortion",
-    "woundsys_tinnitus_volume",
-    "woundsys_fur_blood_models",
-    "woundsys_fur_blood_alpha",
-    "woundsys_blood_effects",
     "woundsys_blood_color",
     "woundsys_blood_r",
     "woundsys_blood_g",
     "woundsys_blood_b",
-    "woundsys_blood_stains",
-    "woundsys_blood_trails",
-    "woundsys_blood_quality",
-    "woundsys_blood_max_stains",
-    "woundsys_blood_bodyflow",
-    "woundsys_blood_bodyflow_max",
-    "woundsys_blood_bodyflow_alpha",
     "woundsys_minigame_clip_enabled",
     "woundsys_minigame_clip_size",
     "woundsys_minigame_clip_radius",
@@ -117,9 +79,6 @@ local CLIENT_PRESET_CVARS = {
     "woundsys_brain_delay_ms",
     "woundsys_brain_invert_controls",
     "woundsys_brain_reverse_flip",
-    "woundsys_pain_sounds_enabled",
-    "woundsys_death_sounds_enabled",
-    "woundsys_growl_sounds_enabled",
     "woundsys_face_expressions_enabled",
     "woundsys_face_voice_mouth",
     "woundsys_face_expression_distance",
@@ -138,6 +97,7 @@ local SERVER_OPTIONS = {
     {label = "Dislocation heal speed", cvar = "woundsys_dislocation_heal_speed", min = 0.001, max = 5, decimals = 3},
     {label = "Fibrillation rise rate", cvar = "woundsys_fibrillation_rise_rate", min = 0, max = 10, decimals = 2},
     {label = "Fibrillation decay rate", cvar = "woundsys_fibrillation_decay_rate", min = 0, max = 10, decimals = 2},
+    {label = "Shrapnel input Hz", cvar = "woundsys_shrapnel_input_hz", min = 5, max = 60, decimals = 0},
     {label = "Strokes enabled", cvar = "woundsys_strokes_enabled", kind = "bool"},
     {label = "Temperature simulation", cvar = "woundsys_temperature_enabled", kind = "bool"},
     {label = "Map suffocation damage", cvar = "woundsys_map_suffocation_enabled", kind = "bool"},
@@ -146,8 +106,6 @@ local SERVER_OPTIONS = {
     {label = "Gunshot hearing radius", cvar = "woundsys_gunshot_hearing_radius", min = 0, max = 5000, decimals = 0},
     {label = "Gunshot hearing scale", cvar = "woundsys_gunshot_hearing_scale", min = 0, max = 10, decimals = 2},
     {label = "Replace vanilla blood", cvar = "woundsys_replace_vanilla_blood", kind = "bool"},
-    {label = "Server pain vocalizations", cvar = "woundsys_server_pain_sounds_enabled", kind = "bool"},
-    {label = "Server growls/whines/barking", cvar = "woundsys_server_growl_sounds_enabled", kind = "bool"},
     {label = "Limb force enabled", cvar = "woundsys_limb_force_enabled", kind = "bool"},
     {label = "Limb force movement scale", cvar = "woundsys_limb_force_movement_scale", min = 0, max = 2, decimals = 2},
     {label = "Limb force weapon threshold", cvar = "woundsys_limb_force_weapon_threshold", min = 0, max = 1, decimals = 2},
@@ -310,54 +268,16 @@ local function BuildClientPanel(panel)
     panel:CheckBox("Pain pixel shader", "woundsys_pain_shader_enabled")
     panel:NumSlider("Pain shader strength", "woundsys_pain_shader_strength", 0, 2, 2)
     panel:NumSlider("Pain shader distortion", "woundsys_pain_shader_distortion", 0, 2, 2)
-    panel:NumSlider("Medical audio loudness", "woundsys_audio_master", 0, 2, 2)
-    panel:CheckBox("CAS3 health audio", "woundsys_music_enabled")
-    panel:NumSlider("Dying/death cue volume", "woundsys_music_volume", 0, 1, 2)
-    panel:NumSlider("Drone volume", "woundsys_music_drone_volume", 0, 1, 2)
-    panel:CheckBox("Sadness audio distortion", "woundsys_music_sadness_distortion")
-    panel:NumSlider("Tinnitus SFX volume", "woundsys_tinnitus_volume", 0, 2, 2)
+    panel:NumSlider("Medical item sound loudness", "woundsys_audio_master", 0, 2, 2)
     AddKeyBinder(panel, "Wound view key", "woundsys_woundview_key", KEY_T or 20)
     AddKeyBinder(panel, "Self-use item key", "woundsys_bodyuse_key", KEY_F or 17)
     AddKeyBinder(panel, "World item grab key", "woundsys_worlditem_grab_key", KEY_E or 11)
-    panel:CheckBox("Enable pain vocalizations", "woundsys_pain_sounds_enabled")
-    panel:CheckBox("Enable death vocalizations", "woundsys_death_sounds_enabled")
-    panel:CheckBox("Enable unhappy growls", "woundsys_growl_sounds_enabled")
 
     AddHelp(panel, "Flex-based facial feedback for supported playermodels.")
     panel:CheckBox("Facial expressions", "woundsys_face_expressions_enabled")
     panel:CheckBox("Voice mouth movement", "woundsys_face_voice_mouth")
     panel:NumSlider("Face update distance", "woundsys_face_expression_distance", 256, 6000, 0)
 
-    AddHelp(panel, "Symptom moodles. Anchor accepts topleft, topright, bottomleft, bottomright, centerleft, or centerright. Disable entries with comma-separated moodle ids.")
-    panel:CheckBox("Moodles enabled", "woundsys_moodles_enabled")
-    panel:CheckBox("Show chip-gated diagnostics", "woundsys_moodles_medical_chip")
-    panel:NumSlider("Moodle scale", "woundsys_moodles_scale", 0.4, 3, 2)
-    panel:NumSlider("Moodle icon size", "woundsys_moodles_icon_size", 24, 128, 0)
-    panel:NumSlider("Moodle gap", "woundsys_moodles_gap", 0, 64, 0)
-    panel:NumSlider("Moodle columns", "woundsys_moodles_columns", 1, 32, 0)
-    panel:NumSlider("Moodle offset X", "woundsys_moodles_offset_x", -600, 600, 0)
-    panel:NumSlider("Moodle offset Y", "woundsys_moodles_offset_y", -600, 600, 0)
-    panel:TextEntry("Moodle anchor", "woundsys_moodles_anchor")
-    panel:CheckBox("Always show side moodles", "woundsys_moodles_always_show_side")
-    panel:CheckBox("Show side moodles while cursor visible", "woundsys_moodles_side_on_cursor")
-    panel:NumSlider("Max main moodles", "woundsys_moodles_max_main", 1, 40, 0)
-    panel:NumSlider("Moodle update seconds", "woundsys_moodles_update_rate", 0.1, 5, 1)
-    panel:CheckBox("Moodle tooltips", "woundsys_moodles_tooltips")
-    panel:TextEntry("Disabled moodle ids", "woundsys_moodles_disabled")
-
-    AddHelp(panel, "Alien blood / fur blood model overlay.")
-    panel:CheckBox("Draw alien blood on playermodels", "woundsys_fur_blood_models")
-    panel:NumSlider("Alien blood opacity", "woundsys_fur_blood_alpha", 0, 0.5, 2)
-
-    AddHelp(panel, "Decorative blood stains, pools, trails, and droplets.")
-    panel:CheckBox("Blood effects", "woundsys_blood_effects")
-    panel:CheckBox("Blood stains / pools", "woundsys_blood_stains")
-    panel:CheckBox("Blood trails", "woundsys_blood_trails")
-    panel:NumSlider("Blood effect quality", "woundsys_blood_quality", 0, 2, 0)
-    panel:NumSlider("Max blood stains", "woundsys_blood_max_stains", 0, 250, 0)
-    panel:CheckBox("Body-following blood flow", "woundsys_blood_bodyflow")
-    panel:NumSlider("Max body blood flows (0 auto)", "woundsys_blood_bodyflow_max", 0, 96, 0)
-    panel:NumSlider("Body blood flow opacity", "woundsys_blood_bodyflow_alpha", 0, 2, 2)
 
     AddHelp(panel, "Minigame invisible clip border.")
     panel:CheckBox("Clip minigame visuals", "woundsys_minigame_clip_enabled")
@@ -732,6 +652,21 @@ local function BuildAdminDebugPanel(panel)
         SendAdminDebug("set_dismember", selectedLimb, 0)
     end
 
+    -- SECTION: Shrapnel
+    panel:Help("--- Shrapnel ---")
+
+    local shrapEntry = panel:TextEntry("Shrapnel Amount", "1")
+
+    local btnAddShrap = panel:Button("Add Shrapnel to Selected Limb")
+    btnAddShrap.DoClick = function()
+        SendAdminDebug("add_shrapnel", selectedLimb, tonumber(shrapEntry:GetValue()) or 1)
+    end
+
+    local btnRemShrap = panel:Button("Remove All Shrapnel from Selected Limb")
+    btnRemShrap.DoClick = function()
+        SendAdminDebug("remove_shrapnel", selectedLimb, 0)
+    end
+
     -- SECTION: Bleeding per-limb
     panel:Help("--- Per-Limb Bleeding ---")
 
@@ -753,3 +688,7 @@ hook.Add("PopulateToolMenu", "WoundSystem_OptionsMenu", function()
     spawnmenu.AddToolMenuOption("Options", "doggo's addons", "WoundSystem_Server", "C:U Health System - Server", "", "", BuildServerPanel)
     spawnmenu.AddToolMenuOption("Options", "doggo's addons", "WoundSystem_AdminDebug", "C:U Health System - Admin Debug", "", "", BuildAdminDebugPanel)
 end)
+
+-- Full-screen post-process effects (pain / oxygen / blood-loss shader, colour modify, toy-town distortion, sharpen, motion blur,
+-- nausea camera roll). Off by default: together with the Z-City render hooks they made the first-person view flicker.
+CreateClientConVar("woundsys_screen_effects", "0", true, false, "Enable the WoundSystem full-screen post-process effects (pain shader, blur, camera roll). Screen vignettes stay on.", 0, 1)

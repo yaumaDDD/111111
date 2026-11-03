@@ -131,6 +131,14 @@ end
 hg.DeathCam = false
 
 function hg.organism.GasDamage(org, dmg, dmgInfo)
+	-- a bridged player: the gas damages his lungs in WoundSystem (WB.SyncToxins: slow suffocation), same scale as the Z-City lungs
+	local WBr = hg.WoundBridge
+	local gasPly = WBr and IsValid(org.owner) and WBr.GetPlayer(org.owner)
+	if gasPly and WBr.IsBridged(gasPly) then
+		org.wbLungs = math.min((org.wbLungs or 0) + dmg / 40, 1)
+		return
+	end
+
 	hg.organism.input_list.lungsR(org, 1, dmg / 10, dmgInfo)
 	hg.organism.input_list.lungsL(org, 1, dmg / 10, dmgInfo)
 	hg.organism.input_list.trachea(org, 1, dmg / 10, dmgInfo)
@@ -222,6 +230,10 @@ end
 --hg.organism.AmputateLimb(Entity(2).organism, "rarm")
 
 function hg.organism.AddWound(ent, tr, bone, dmgInfo, dmgPos, dmgBlood, inputHole, outputHole)
+	-- a bridged player's wounds are derived from the bleeding of his WoundSystem limbs (WB.SyncWounds)
+	local WBr = hg.WoundBridge
+	if WBr and WBr.IsBridged and WBr.IsBridged(WBr.GetPlayer(ent)) then return end
+
 	local org = ent.organism
 	if org.superfighter then return end
 	
@@ -265,9 +277,9 @@ function hg.organism.AddWound(ent, tr, bone, dmgInfo, dmgPos, dmgBlood, inputHol
 	end
 end
 
-function hg.organism.AddWoundManual(ent,dmgBlood,localPos,localAng,bone,time)
-	-- living WoundSystem player: the cut becomes WoundSystem bleeding
-	if hg.WoundBridge and hg.WoundBridge.AddWoundManual(ent, dmgBlood, bone) then return end
+function hg.organism.AddWoundManual(ent,dmgBlood,localPos,localAng,bone,time,glass)
+	-- living WoundSystem player: the cut becomes WoundSystem bleeding (glass = broken glass: shards stay in the wound)
+	if hg.WoundBridge and hg.WoundBridge.AddWoundManual(ent, dmgBlood, bone, glass) then return end
 
 	local org = ent.organism
 	if org.superfighter then return end
@@ -458,7 +470,7 @@ hook.Add("EntityTakeDamage", "homigrad-damage", function(ent, dmgInfo)
 	if not org then return end
 
 	-- Fall of a living WoundSystem player: C:U fall model (landing speed -> impact on feet / shins)
-	if dmgInfo:IsFallDamage() and ent:IsPlayer() and hg.WoundBridge and hg.WoundBridge.IsBridged(ent) then
+	if dmgInfo:IsDamageType(DMG_FALL) and ent:IsPlayer() and hg.WoundBridge and hg.WoundBridge.IsBridged(ent) then
 		if org.godmode then return true end
 		hg.WoundBridge.ApplyFall(ent, dmgInfo)
 		return true
@@ -1470,7 +1482,11 @@ local function velocityDamage(ent, data)
 		-- same filters as above (speed, throttling, mass); the hit itself goes through the C:U impact model
 		local massK = (IsValid(data.HitObject) and not data.HitObject:GetEntity():IsWorld()) and math.min(data.HitObject:GetMass() / 20, 1) or 1
 		local dot = math.abs(data.OurOldVelocity:GetNormalized():Dot(data.HitNormal))
-		hg.WoundBridge.ApplyCollision(ply, speed, dot, massK, att, bonename, hitgroup, (surfaceType and bleedSurfaces[surfaceType]) and surfaceType or nil)
+		-- a breakable window counts as glass whatever the surface property says
+		local he = data.HitEntity
+		local glassEnt = IsValid(he) and string.find(he:GetClass(), "break") and he.GetBrushSurfaces and he:GetBrushSurfaces()[1]
+			and string.find(he:GetBrushSurfaces()[1]:GetMaterial():GetName(), "glass")
+		hg.WoundBridge.ApplyCollision(ply, speed, dot, massK, att, bonename, hitgroup, glassEnt and "glass" or ((surfaceType and bleedSurfaces[surfaceType]) and surfaceType or nil))
 		return
 	end
 

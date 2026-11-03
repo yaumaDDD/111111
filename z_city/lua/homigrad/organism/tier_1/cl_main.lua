@@ -180,67 +180,7 @@ hook.Add("Player Disconnected", "removeshits", function()
 	remove_imgs()
 end)
 
-hook.Add("radialOptions", "DislocatedJoint", function()
-    if !lply:Alive() or !lply.organism or lply.organism.otrub then return end
-	if (lply.tried_fixing_limb or 0) > CurTime() then return end
-	local org = lply.organism
-	if org.pain > 60 then return end
-    
-    if org.llegdislocation or org.rlegdislocation then
-        local tbl = {
-            function()
-				lply.tried_fixing_limb = CurTime() + 0.5
-				RunConsoleCommand("hg_fixdislocation", 1, 0)
-            end,
-            "Fix dislocation (leg)"
-        }
-        hg.radialOptions[#hg.radialOptions + 1] = tbl
-	else
-		local ent = hg.eyeTrace(lply).Entity
-
-		if ent.organism and (ent.organism.llegdislocation or ent.organism.rlegdislocation) then
-			local tbl = {
-				function()
-					lply.tried_fixing_limb = CurTime() + 0.5
-					RunConsoleCommand("hg_fixdislocation", 1, 1)
-				end,
-				"Fix "..ent:GetPlayerName().."'s dislocation (leg)"
-			}
-			hg.radialOptions[#hg.radialOptions + 1] = tbl
-		end
-    end
-end)
-
-hook.Add("radialOptions", "DislocatedJoint2", function()
-    if !lply:Alive() or !lply.organism or lply.organism.otrub then return end
-	if (lply.tried_fixing_limb or 0) > CurTime() then return end
-	local org = lply.organism
-	if org.pain > 60 then return end
-	
-    if org.larmdislocation or org.rarmdislocation then
-        local tbl = {
-            function()
-				lply.tried_fixing_limb = CurTime() + 0.5
-				RunConsoleCommand("hg_fixdislocation", 2, 0)
-            end,
-            "Fix dislocation (arm)"
-        }
-        hg.radialOptions[#hg.radialOptions + 1] = tbl
-	else
-		local ent = hg.eyeTrace(lply).Entity
-
-		if ent.organism and (ent.organism.larmdislocation or ent.organism.rarmdislocation) then
-			local tbl = {
-				function()
-					lply.tried_fixing_limb = CurTime() + 0.5
-					RunConsoleCommand("hg_fixdislocation", 2, 1)
-				end,
-				"Fix "..ent:GetPlayerName().."'s dislocation (arm)"
-			}
-			hg.radialOptions[#hg.radialOptions + 1] = tbl
-		end
-    end
-end)
+-- (Z-City "Fix dislocation" radial options removed: dislocations are reduced only in the WoundSystem wound view)
 
 hook.Add("PostRender", "screenshot_think", function()
 	local org = lply.organism
@@ -853,6 +793,9 @@ hook.Add("Player-Ragdoll think", "organism-think-client-blood", function(ply, en
 						if not wound[2] or not wound[3] or not bonePos or not boneAng then return end
 						local pos, ang = LocalToWorld(wound[2], wound[3], bonePos, boneAng)
 
+						-- own wound next to the first-person camera (head / neck): its blood sprites would flicker in front of the face
+						if ply == lply and pos:DistToSqr(EyePos()) < 14 * 14 then wound[5] = time + 0.1 continue end
+
 						local water = bit.band(util.PointContents(pos), CONTENTS_WATER) == CONTENTS_WATER
 						if water then
 							if wound[5] + 1 < time then
@@ -899,6 +842,8 @@ hook.Add("Player-Ragdoll think", "organism-think-client-blood", function(ply, en
 						local bonePos, boneAng = mat:GetTranslation(), mat:GetAngles()
 						if not wound[2] or not wound[3] or not bonePos or not boneAng then return end
 						local pos = LocalToWorld(wound[2], wound[3], bonePos, boneAng)
+
+						if ply == lply and pos:DistToSqr(EyePos()) < 14 * 14 then wound[5] = time + 0.1 continue end -- (see above)
 
 						local dir = wound[6]
 						local len = dir:Length() * (org.pulse or 70) / 70

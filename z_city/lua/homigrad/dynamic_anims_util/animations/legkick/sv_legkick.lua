@@ -157,6 +157,13 @@ function PLAYER:LegAttack()
 					MaxPenLenGlobal = 1
                     hg.AddForceRag(ent, tr.PhysicsBone or 0, normal * dmg * 1000, 0.25)
                     ent:TakeDamageInfo(dmginfo)
+
+                    -- kicked through a window: shards in the kicking foot (WoundSystem shrapnel)
+                    if hg.WoundBridge and hg.WoundBridge.KickGlass and string.find(ent:GetClass(), "break") and ent.GetBrushSurfaces
+                        and ent:GetBrushSurfaces()[1] and string.find(ent:GetBrushSurfaces()[1]:GetMaterial():GetName(), "glass")
+                        and ent:Health() <= 0 then
+                        hg.WoundBridge.KickGlass(self, true)
+                    end
                     
                     if IsValid(phys) then
                         phys:ApplyForceOffset(normal * dmg * 200, tr.HitPos)

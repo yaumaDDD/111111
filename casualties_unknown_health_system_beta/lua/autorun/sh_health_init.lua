@@ -23,9 +23,7 @@ local serverFiles = {
     "woundsystem/server/health/sv_fall_impact.lua",
     "woundsystem/server/health/sv_cas3_bodyfeel.lua",
     "woundsystem/server/sv_health.lua",
-    "woundsystem/server/sv_blood_effects.lua",
     "woundsystem/server/sv_brain_effects.lua",
-    "woundsystem/server/sv_deathscreen.lua",
     "woundsystem/server/sv_sounds.lua"
 }
 
@@ -35,6 +33,7 @@ local clientFiles = {
     "woundsystem/client/minigames/cl_clip.lua",
     "woundsystem/client/minigames/sh_handphysics.lua",
     "woundsystem/client/minigames/minigame_dev_config.lua",
+    "woundsystem/client/minigames/cl_shrapnel.lua",
     "woundsystem/client/minigames/cl_dislocation.lua",
     "woundsystem/client/minigames/cl_bandage.lua",
     "woundsystem/client/minigames/cl_syringe.lua",
@@ -45,9 +44,8 @@ local clientFiles = {
     "woundsystem/client/cl_facial_expressions.lua",
     "woundsystem/client/cl_screen_effect_smoothing.lua",
     "woundsystem/client/cl_screen_effect_shaders.lua",
-    "woundsystem/client/cl_blood_effects.lua",
+    "woundsystem/client/cl_blood_ui.lua",
     "woundsystem/client/cl_brain_effects.lua",
-    "woundsystem/client/cl_moodles.lua",
     "woundsystem/client/cl_options.lua",
     "woundsystem/client/cl_sound_manager.lua"
 }

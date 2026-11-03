@@ -122,6 +122,7 @@ hook.Add("Think", "WoundSystem_SpinNauseaThink", function()
 end)
 
 hook.Add("CalcView", "WoundSystem_SpinNauseaCalcView", function(ply, pos, angles, fov)
+    local fxCv = GetConVar("woundsys_screen_effects") if not (fxCv and fxCv:GetBool()) then return end -- heavy full-screen effects are off by default (flicker with Z-City)
     if not cvNauseaEnabled:GetBool() or not WoundSystemSpinNauseaIntensity or WoundSystemSpinNauseaIntensity <= 0.05 then return end
     if not IsValid(ply) or not ply:Alive() then return end
 
@@ -135,6 +136,7 @@ hook.Add("CalcView", "WoundSystem_SpinNauseaCalcView", function(ply, pos, angles
 end)
 
 hook.Add("RenderScreenspaceEffects", "WoundSystem_SpinNauseaRenderFX", function()
+    local fxCv = GetConVar("woundsys_screen_effects") if not (fxCv and fxCv:GetBool()) then return end -- heavy full-screen effects are off by default (flicker with Z-City)
     if not cvNauseaEnabled:GetBool() or not WoundSystemSpinNauseaIntensity or WoundSystemSpinNauseaIntensity <= 0.12 then return end
 
     local intensity = WoundSystemSpinNauseaIntensity

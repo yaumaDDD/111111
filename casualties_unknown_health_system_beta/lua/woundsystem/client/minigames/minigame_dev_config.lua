@@ -5,6 +5,8 @@ local cfg = {
     bandageHandOffsetY = 400,
     aedHandOffsetX = 100,
     aedHandOffsetY = 400,
+    shrapnelHandOffsetX = 100,
+    shrapnelHandOffsetY = 600,
 
     -- Optional dislocation overrides. Leave keys commented/absent to use
     -- DEFAULT_CONFIG in cl_dislocation.lua.

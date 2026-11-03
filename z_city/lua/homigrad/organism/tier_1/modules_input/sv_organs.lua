@@ -168,6 +168,10 @@ local function hitArtery(artery, org, dmg, dmgInfo, boneindex, dir, hit)
 	if org[artery] == 1 then return 0 end
 	if org[string.Replace(artery, "artery", "").."amputated"] then return end
 
+	-- a bridged player's arterial wounds come from the WoundSystem limb bleeding (WB.SyncWounds)
+	local WBr = hg.WoundBridge
+	if WBr and WBr.IsBridged and WBr.IsBridged(WBr.GetPlayer(org.owner)) then return 0 end
+
 	if artery ~= "arteria" then
 		hg.AddHarmToAttacker(dmgInfo, 4, "Random artery punctured harm")//((1 - org[artery]) - math.max((1 - org[artery]) - dmg,0)) / 4
 	else
