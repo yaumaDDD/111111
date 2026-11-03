@@ -449,7 +449,8 @@ function WB.ApplyImpact(ply, limbId, force, surface)
 	ply._nextLimbPhysicsDamage[limbId] = now + 0.22
 
 	H.ProcessImpactDamage(ply, limbId, force)
-	if surface then WB.SurfaceCut(ply, limbId, force, surface) end
+	-- falls / ragdoll hits make no blood (Z-City dmgBlood = 0): only broken glass cuts
+	if surface and GLASS_SURFACES[surface] then WB.SurfaceCut(ply, limbId, force, surface) end
 	WB.BoneHit(ply, limbId, "impact", force)
 
 	if ply.organism then WB.Sync(ply, ply.organism) end
@@ -474,9 +475,48 @@ function WB.ApplyFall(ply, dmgInfo)
 	if not WB.IsBridged(ply) then return false end
 	if IsValid(ply.FakeRagdoll) then return true end
 
+	-- the landing was already processed from its real speed (OnPlayerHitGround below): the engine damage is only a duplicate
+	-- (and with mp_falldamage 0 it is a flat 10 that says nothing about the height)
+	local now = CurTime()
+	if (ply._wbFallHookAt or 0) + 0.3 > now then return true end
+	ply._wbFallEngineAt = now
+	ply._wbFallEngineSpeed = dmgInfo:GetDamage() * 3.96 + 526.5
+
 	WB.ApplyDamage(ply, dmgInfo, nil, nil, dmgInfo:GetDamage(), false)
 	return true
 end
+
+--- Landing of a standing player: the real landing speed (engine fall damage depends on mp_falldamage and can be a flat 10)
+--- gives the fall damage that WoundSystem turns into leg bone damage (fracture / dislocation, no blood).
+hook.Add("OnPlayerHitGround", "ZCity_WoundBridge_Fall", function(ply, inWater, onFloater, speed)
+	if not IsValid(ply) or not ply:IsPlayer() or not ply:Alive() then return end
+	if inWater or onFloater or not WB.IsBridged(ply) then return end
+	if IsValid(ply.FakeRagdoll) then return end
+
+	speed = tonumber(speed) or 0
+	if speed <= 526.5 then return end
+
+	local now = CurTime()
+	-- the engine damage came first and was at least as big: it has been processed already
+	if (ply._wbFallEngineAt or 0) + 0.3 > now and (ply._wbFallEngineSpeed or 0) >= speed - 40 then return end
+	ply._wbFallHookAt = now
+
+	local dmg = DamageInfo()
+	dmg:SetDamage((speed - 526.5) / 3.96) -- the inverse of WoundSystem's GetRecentFallSpeed(dmg)
+	dmg:SetDamageType(DMG_FALL)
+	dmg:SetAttacker(game.GetWorld())
+	dmg:SetInflictor(game.GetWorld())
+	WB.ApplyDamage(ply, dmg, nil, nil, dmg:GetDamage(), false)
+end)
+
+--- Z-City legs(): a broken / dislocated leg stuns the player (hg.LightStunPlayer(owner, 2))
+local function LegStun(ply, limbName)
+	if not IsValid(ply) or not WB.IsBridged(ply) or not hg.LightStunPlayer then return end
+	if not (string.find(limbName, "^thigh_") or string.find(limbName, "^crus_") or string.find(limbName, "^foot_")) then return end
+	timer.Simple(0, function() if IsValid(ply) and ply:Alive() then hg.LightStunPlayer(ply, 2) end end)
+end
+hook.Add("WoundSystem_OnFracture", "ZCity_WoundBridge_LegStun", LegStun)
+hook.Add("WoundSystem_OnDislocate", "ZCity_WoundBridge_LegStun", LegStun)
 
 --- Z-City AddWoundManual (gibs, glass, explosion cuts): turn it into WoundSystem bleeding
 function WB.AddWoundManual(ent, dmgBlood, bone, glass)

@@ -2119,7 +2119,7 @@ hook.Add("EntityFireBullets", "WoundSystem_GunshotHearingLoss", function(ent, bu
     ApplyGunshotHearingLoss(ent, origin, gain)
 end)
 
-local function ProcessImpactDamage(ply, limb, force)
+local function ProcessImpactDamage(ply, limb, force, boneOverride)
     local body = GetBody(ply)
     local state = PlayerLimbs[ply] and PlayerLimbs[ply][limb]
     if not body or body.isGodMode then return end
@@ -2129,7 +2129,7 @@ local function ProcessImpactDamage(ply, limb, force)
     -- C:U passes limb collision force directly into ImpactDamage. Keep this
     -- unamplified; Source speeds are converted by the caller before this point.
     local jumpSpeed = (body and body.jumpSpeed) and body.jumpSpeed or 6.5
-    if force <= jumpSpeed then return end
+    if force <= jumpSpeed and not (boneOverride and boneOverride > 0.05) then return end
 
     local armorReduction = 1.0
 
@@ -2155,6 +2155,8 @@ local function ProcessImpactDamage(ply, limb, force)
     -- bone damage = how far the force is past the (random) fracture threshold of the limb
     local structuralMultiplier = math.Clamp(((state.muscle or 100) * 0.01) + 0.5, 0, 1)
     local boneDamage = force / (math.Rand(jumpSpeed * 4.0, jumpSpeed * 7.0) * structuralMultiplier)
+    -- a fall gives the bone damage directly (from the landing speed, see the fall branch of HandleDamage)
+    if boneOverride then boneDamage = boneOverride * math.Rand(0.85, 1.15) end
 
     if extremity then
         -- Z-City legs() / arms(): below 0.7 (arms 0.6) nothing; from there a blunt hit dislocates; at 1 or more it breaks
@@ -6309,6 +6311,7 @@ WoundSystem.Health.HandleDamage = function(ent, dmginfo)
     local affectedLimbs = {}
     local fallSpeed = 0
     local fallForce = 0
+    local fallBone = nil
     WoundSystem.Health.RecordDamageAttribution(ply, body, dmginfo, false)
     Fn.EmitBulletHitSound(ply, dmginfo)
     EmitDamageBloodEffect(ply, dmginfo, dmg)
@@ -6361,12 +6364,11 @@ WoundSystem.Health.HandleDamage = function(ent, dmginfo)
             fallForce = fallForce * 0.5
         end
 
-        affectedLimbs = {"foot_L", "foot_R"}
-        local jumpSpeed = (body and body.jumpSpeed) or 6.5
-        if fallForce > jumpSpeed * 1.8 then
-            table.insert(affectedLimbs, "crus_L")
-            table.insert(affectedLimbs, "crus_R")
-        end
+        -- Z-City: a landing hurts the legs only through the bone (sv_bone.lua legs()); no blood.
+        -- bone damage 0 at the safe landing speed (526.5), 0.7 = dislocation, 1 = fracture at ~900 u/s (a fall of ~11 m)
+        fallBone = math.max((fallSpeed - 526.5) / 373, 0)
+        -- one leg bone per side (shin or foot)
+        affectedLimbs = {(math.random(3) == 1) and "foot_L" or "crus_L", (math.random(3) == 1) and "foot_R" or "crus_R"}
 
     -- AOE Blast Damage Spread for Active Players
     elseif dmginfo:IsDamageType(DMG_BLAST) then
@@ -6422,7 +6424,7 @@ WoundSystem.Health.HandleDamage = function(ent, dmginfo)
         if dmginfo:IsFallDamage() then
             ply._nextLimbPhysicsDamage = ply._nextLimbPhysicsDamage or {}
             ply._nextLimbPhysicsDamage[limb] = math.max(ply._nextLimbPhysicsDamage[limb] or 0, CurTime() + 0.12)
-            ProcessImpactDamage(ply, limb, fallForce)
+            ProcessImpactDamage(ply, limb, fallForce, fallBone or 0)
 
         elseif Fn.IsBulletImpactDamage(dmginfo) then
             -- ==========================================
