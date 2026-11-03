@@ -1257,9 +1257,7 @@ local function StartMinigame(swep, spec, idx, target, limbId)
 			local used, start = session.deferredUsed or 0, session.startAmount or 0
 			local frac = start > 0 and math.Clamp(used / start, 0, 1) or 0
 
-			local function Nothing()
-				if not interrupted and IsValid(ply) then ply:PrintMessage(HUD_PRINTCENTER, "Not completed - nothing was applied") end
-			end
+			local function Nothing() end -- nothing applied: silently, the sweep is not spent
 
 			if live then
 				if not IsValid(swep) then return end
