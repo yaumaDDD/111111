@@ -45,7 +45,6 @@ WoundSystem.NetStrings = WoundSystem.NetStrings or {
     "WoundSystem_RemoveLimbStatus",
     "WoundSystem_DismemberVisuals",
     "WoundSystem_ResetDismemberVisuals",
-    "WoundSystem_BloodEffect",
     "WoundSystem_BloodVomit",
     "WoundSystem_VomitWarning",
     "WoundSystem_LobotomyEffect",

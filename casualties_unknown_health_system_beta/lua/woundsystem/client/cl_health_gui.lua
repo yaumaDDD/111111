@@ -670,41 +670,7 @@ local function DrawFurBloodOverlayEntity(ent, source)
     drawingFurBloodOverlay = false
 end
 
-hook.Add("PostPlayerDraw", "WoundSystem_FurBloodModelOverlay", function(ply)
-    DrawFurBloodOverlayEntity(ply, ply)
-end)
-
-hook.Add("PostDrawTranslucentRenderables", "WoundSystem_FurBloodRagdollOverlay", function()
-    if drawingFurBloodOverlay or not CVars.FurBloodModels:GetBool() or LowEndMode() then return end
-
-    local now = CurTime()
-    WoundSystem.FurBloodRagdollCache = WoundSystem.FurBloodRagdollCache or {
-        nextScan = 0,
-        entries = {}
-    }
-
-    local cache = WoundSystem.FurBloodRagdollCache
-    if now >= (cache.nextScan or 0) then
-        cache.nextScan = now + 0.25
-        cache.entries = {}
-
-        for _, className in ipairs({"prop_ragdoll", "hl2mp_ragdoll"}) do
-            for _, ragdoll in ipairs(ents.FindByClass(className)) do
-                local owner = ragdoll:GetNWEntity("WoundSystemOwner")
-                if IsValid(owner) and (ragdoll:GetNWBool("WoundSystemUnconsciousRagdoll", false) or ragdoll:GetNWBool("WoundSystemDeadUnconsciousBody", false) or ragdoll:GetNWBool("WoundSystemDeathRagdoll", false)) then
-                    local source = (ragdoll:GetNWBool("WoundSystemDeadUnconsciousBody", false) or ragdoll:GetNWBool("WoundSystemDeathRagdoll", false)) and ragdoll or owner
-                    cache.entries[#cache.entries + 1] = {ragdoll = ragdoll, source = source}
-                end
-            end
-        end
-    end
-
-    for _, entry in ipairs(cache.entries or {}) do
-        if IsValid(entry.ragdoll) and IsValid(entry.source) then
-            DrawFurBloodOverlayEntity(entry.ragdoll, entry.source)
-        end
-    end
-end)
+-- (fur blood model/ragdoll overlay hooks removed: blood on bodies is rendered by Z-City only)
 
 surface.CreateFont("CrunchyTechFont", { font = "Perfect DOS VGA 437", size = 18 })
 surface.CreateFont("CrunchyTechFontBold", { font = "Perfect DOS VGA 437", size = 24 })

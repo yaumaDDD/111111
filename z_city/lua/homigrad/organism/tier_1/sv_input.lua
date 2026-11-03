@@ -222,6 +222,10 @@ end
 --hg.organism.AmputateLimb(Entity(2).organism, "rarm")
 
 function hg.organism.AddWound(ent, tr, bone, dmgInfo, dmgPos, dmgBlood, inputHole, outputHole)
+	-- a bridged player's wounds are derived from the bleeding of his WoundSystem limbs (WB.SyncWounds)
+	local WBr = hg.WoundBridge
+	if WBr and WBr.IsBridged and WBr.IsBridged(WBr.GetPlayer(ent)) then return end
+
 	local org = ent.organism
 	if org.superfighter then return end
 	

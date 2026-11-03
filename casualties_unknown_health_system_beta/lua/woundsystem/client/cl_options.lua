@@ -83,20 +83,10 @@ local CLIENT_PRESET_CVARS = {
     "woundsys_music_drone_volume",
     "woundsys_music_sadness_distortion",
     "woundsys_tinnitus_volume",
-    "woundsys_fur_blood_models",
-    "woundsys_fur_blood_alpha",
-    "woundsys_blood_effects",
     "woundsys_blood_color",
     "woundsys_blood_r",
     "woundsys_blood_g",
     "woundsys_blood_b",
-    "woundsys_blood_stains",
-    "woundsys_blood_trails",
-    "woundsys_blood_quality",
-    "woundsys_blood_max_stains",
-    "woundsys_blood_bodyflow",
-    "woundsys_blood_bodyflow_max",
-    "woundsys_blood_bodyflow_alpha",
     "woundsys_minigame_clip_enabled",
     "woundsys_minigame_clip_size",
     "woundsys_minigame_clip_radius",
@@ -345,20 +335,6 @@ local function BuildClientPanel(panel)
     panel:NumSlider("Moodle update seconds", "woundsys_moodles_update_rate", 0.1, 5, 1)
     panel:CheckBox("Moodle tooltips", "woundsys_moodles_tooltips")
     panel:TextEntry("Disabled moodle ids", "woundsys_moodles_disabled")
-
-    AddHelp(panel, "Alien blood / fur blood model overlay.")
-    panel:CheckBox("Draw alien blood on playermodels", "woundsys_fur_blood_models")
-    panel:NumSlider("Alien blood opacity", "woundsys_fur_blood_alpha", 0, 0.5, 2)
-
-    AddHelp(panel, "Decorative blood stains, pools, trails, and droplets.")
-    panel:CheckBox("Blood effects", "woundsys_blood_effects")
-    panel:CheckBox("Blood stains / pools", "woundsys_blood_stains")
-    panel:CheckBox("Blood trails", "woundsys_blood_trails")
-    panel:NumSlider("Blood effect quality", "woundsys_blood_quality", 0, 2, 0)
-    panel:NumSlider("Max blood stains", "woundsys_blood_max_stains", 0, 250, 0)
-    panel:CheckBox("Body-following blood flow", "woundsys_blood_bodyflow")
-    panel:NumSlider("Max body blood flows (0 auto)", "woundsys_blood_bodyflow_max", 0, 96, 0)
-    panel:NumSlider("Body blood flow opacity", "woundsys_blood_bodyflow_alpha", 0, 2, 2)
 
     AddHelp(panel, "Minigame invisible clip border.")
     panel:CheckBox("Clip minigame visuals", "woundsys_minigame_clip_enabled")

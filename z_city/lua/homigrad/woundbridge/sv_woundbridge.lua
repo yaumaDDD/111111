@@ -600,12 +600,148 @@ function WB.FixDislocation(fixer, args)
 	return true
 end
 
+-----------------------------------------------------------------------------------------------------------------------
+-- BLOOD  (WoundSystem limb bleeding -> Z-City wounds / arterial wounds)
+--
+-- WoundSystem's own blood effects are gone. The blood the player sees is Z-City's: the client `organism-think-client-blood`
+-- think draws droplets / streams / fountains for every entry of `ply.wounds` and `ply.arterialwounds` (bone-local
+-- positions, so the blood follows the limb, in the fake ragdoll too). Those lists are rebuilt here from the bleeding
+-- of the WoundSystem limbs, i.e. per limb, like in the original Z-City.
+-----------------------------------------------------------------------------------------------------------------------
+
+local B_HEAD, B_NECK = "ValveBiped.Bip01_Head1", "ValveBiped.Bip01_Neck1"
+local B_CLAV = "ValveBiped.Bip01_Spine2"
+local B_PELVIS = "ValveBiped.Bip01_Pelvis"
+
+local WoundBones, StumpBones, WoundOrder = {head = B_HEAD}, {head = B_NECK}, {"head"}
+
+for _, side in ipairs({"L", "R"}) do
+	local pre = "ValveBiped.Bip01_" .. side .. "_"
+	WoundBones["arm_" .. side], StumpBones["arm_" .. side] = pre .. "UpperArm", B_CLAV
+	WoundBones["forearm_" .. side], StumpBones["forearm_" .. side] = pre .. "Forearm", pre .. "UpperArm"
+	WoundBones["hand_" .. side], StumpBones["hand_" .. side] = pre .. "Hand", pre .. "Forearm"
+	WoundBones["thigh_" .. side], StumpBones["thigh_" .. side] = pre .. "Thigh", B_PELVIS
+	WoundBones["crus_" .. side], StumpBones["crus_" .. side] = pre .. "Calf", pre .. "Thigh"
+	WoundBones["foot_" .. side], StumpBones["foot_" .. side] = pre .. "Foot", pre .. "Calf"
+	for _, base in ipairs({"arm_", "forearm_", "hand_", "thigh_", "crus_", "foot_"}) do
+		WoundOrder[#WoundOrder + 1] = base .. side
+	end
+end
+
+local ARTERY_DIR = Vector(-100, 0, 0)
+
+--- effective bleeding of a WoundSystem limb (0 when the tourniquet holds it)
+local function LimbBleed(l)
+	if type(l) ~= "table" or l.blockedBleeding then return 0 end
+	local b = tonumber(l.bleed) or 0
+	if l.isBandaged then b = b * 0.5 end
+	return b
+end
+
+function WB.SyncWounds(ply, org, limbs)
+	if not IsValid(ply) or not org or type(limbs) ~= "table" then return end
+
+	local now = CurTime()
+	if (ply._wbWoundNext or 0) > now then return end
+	ply._wbWoundNext = now + 0.25
+
+	local geo = ply._wbWoundGeo
+	if not geo then geo = {} ply._wbWoundGeo = geo end
+
+	local wounds, arterial, sig = {}, {}, {}
+
+	for _, id in ipairs(WoundOrder) do
+		local l = limbs[id]
+		local bleed = LimbBleed(l)
+
+		if bleed >= 0.5 then
+			local stump = l.dismembered and true or false
+			local bone = (stump and StumpBones[id]) or WoundBones[id]
+			local n = (bleed < 25 and 1) or (bleed < 60 and 2) or 3
+			-- quantised so the lists are not re-sent for every tiny change of the bleeding
+			local sev = math.Clamp(math.Round(bleed / 4 / n * 2) / 2, 0.5, 25)
+
+			local g = geo[id]
+			if not g then g = {} geo[id] = g end
+
+			for i = 1, n do
+				local e = g[i]
+				if not e or e.bone ~= bone then
+					e = {
+						bone = bone,
+						pos = VectorRand(-2.5, 2.5),
+						ang = Angle(math.Rand(-180, 180), math.Rand(-180, 180), 0),
+						time = now + math.Rand(0, 1),
+					}
+					if stump then e.pos = Vector(0, 0, 0) + VectorRand(-1.5, 1.5) end
+					g[i] = e
+				end
+				wounds[#wounds + 1] = {sev, e.pos, e.ang, bone, e.time}
+			end
+
+			local art = (stump and bleed >= 2) or bleed >= 55
+			if art then
+				local asev = math.Clamp(math.Round(bleed / 20), 1, 6)
+				local key = id .. "artery"
+				local e = g.artery
+				if not e or e.bone ~= bone then
+					e = {bone = bone, pos = stump and Vector(0, 0, 0) or VectorRand(-1.5, 1.5), time = now}
+					g.artery = e
+				end
+				arterial[#arterial + 1] = {asev, e.pos, Angle(), bone, e.time, ARTERY_DIR, key}
+				sig[#sig + 1] = id .. ":" .. n .. ":" .. sev .. ":" .. asev
+			else
+				sig[#sig + 1] = id .. ":" .. n .. ":" .. sev
+			end
+		else
+			geo[id] = nil
+		end
+	end
+
+	local sigStr = table.concat(sig, "|")
+
+	-- rebuild when the bleeding changed, or when something else (legacy code, Clear, spawn) replaced the lists
+	if ply._wbWoundSig == sigStr and org.wounds == ply._wbWounds and org.arterialwounds == ply._wbArterial
+		and #org.wounds == #wounds and #org.arterialwounds == #arterial then return end
+
+	ply._wbWoundSig, ply._wbWounds, ply._wbArterial = sigStr, wounds, arterial
+	org.wounds, org.arterialwounds = wounds, arterial
+	ply:SetNetVar("wounds", wounds)
+	ply:SetNetVar("arterialwounds", arterial)
+end
+
+-- blood vomit of WoundSystem: only the Z-City blood spray of hg.organism.Vomit (no sound / state, WoundSystem has its own)
+hook.Add("WoundSystem_BloodVomitVisual", "ZCity_WoundBridge_BloodVomit", function(ply, body)
+	if not WB.IsBridged(ply) then return end
+
+	local ent = hg.GetCurrentCharacter and hg.GetCurrentCharacter(ply) or ply
+	if not IsValid(ent) then return end
+
+	local bon = "ValveBiped.Bip01_Head1"
+	local bone = ent:LookupBone(bon)
+	local mat = bone and ent:GetBoneMatrix(bone)
+	if not mat then return end
+
+	local org = ply.organism
+	local pulse = org and org.pulse or 70
+
+	net.Start("bloodsquirt2")
+	net.WriteEntity(ent)
+	net.WriteString(bon)
+	net.WriteMatrix(mat)
+	net.WriteVector(mat:GetTranslation() + mat:GetAngles():Right() * 6 + mat:GetAngles():Forward() * 1)
+	net.WriteVector(mat:GetAngles():Right() * 2 * math.Clamp(pulse / 70, 0.4, 1))
+	net.Broadcast()
+end)
+
 function WB.Think(owner, org, dt)
 	if not IsValid(owner) or not owner:IsPlayer() or not owner:Alive() then return end
 
 	local wasOtrub = org.otrub
 	local body = WB.Sync(owner, org)
 	if not body then return end
+
+	WB.SyncWounds(owner, org, WB.GetLimbs(owner))
 
 	org.timeValue = dt
 
@@ -774,6 +910,7 @@ hook.Add("PlayerSpawn", "ZCity_WoundBridge_Spawn", function(ply)
 	if OverrideSpawn then return end
 	ply._WBGetUpQueued = nil
 	ply._WBLimbSnapshot = nil
+	ply._wbWoundSig, ply._wbWounds, ply._wbArterial, ply._wbWoundGeo, ply._wbWoundNext = nil, nil, nil, nil, nil
 end)
 
 -----------------------------------------------------------------------------------------------------------------------

@@ -576,9 +576,7 @@ local function FinishBloodVomit(ply)
     local pos, forward, sourceEnt = GetMouthBloodVomitOrigin(ply, body)
     if not pos then return end
 
-    if WoundSystem.BloodEffects and WoundSystem.BloodEffects.Emit then
-        WoundSystem.BloodEffects.Emit(pos, forward, 1.8, "vomitblood", nil, sourceEnt)
-    end
+    hook.Run("WoundSystem_BloodVomitVisual", ply, body, pos, forward)
 
     local soundEnt = IsValid(sourceEnt) and sourceEnt or ply
     soundEnt:EmitSound(math.random(1, 2) == 1 and "vomit1.ogg" or "vomit2a.ogg", 70, 100, 0.85)
