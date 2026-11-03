@@ -151,6 +151,148 @@ function WB.EyeHit(ply, limbId, chance)
 	return true
 end
 
+-----------------------------------------------------------------------------------------------------------------------
+-- BONES: skull / neck / spine / pelvis
+-- WoundSystem has no limb for them, so the bridge keeps the Z-City bone values (0..1) per player (ply._wbBones) and shows
+-- them to the Z-City code through the shadow organism (WB.Sync): spine1/2 >= 1 and spine3 >= 0.5 = paralysis (ragdoll,
+-- can't move / turn the head), spine3 >= 0.8 = broken neck = instant death (hg.BreakNeck). They do not heal.
+-- Direct hits (bullets, blades, blunt) accumulate like Z-City damageBone(); impacts (falls, ragdoll collisions) break the
+-- bone when the force passes a random threshold (like the C:U fracture check).
+-----------------------------------------------------------------------------------------------------------------------
+
+WB.BoneImmuneDamage = DMG_FALL + DMG_NERVEGAS + DMG_POISON + DMG_BURN + DMG_SLOWBURN + DMG_DROWN + DMG_RADIATION + DMG_ACID + DMG_SHOCK + DMG_PARALYZE + DMG_DISSOLVE
+
+local BONE_TEXT = {
+	spine1 = "I don't feel anything below my hips.",
+	spine2 = "I cant't feel or move anything below my torso.",
+	spine3 = "I can't move at all. I can barely even breathe.",
+}
+
+function WB.GetBones(ply)
+	ply._wbBones = ply._wbBones or {skull = 0, spine1 = 0, spine2 = 0, spine3 = 0, pelvis = 0}
+	return ply._wbBones
+end
+
+--- true when the spine / neck stops the player from standing (Z-City: fake_spine1/2 = 1, fake_spine3 = 0.5)
+function WB.BonesParalyzed(bones)
+	return bones ~= nil and (bones.spine1 >= 1 or bones.spine2 >= 1 or bones.spine3 >= 0.5)
+end
+
+--- Z-City damageBone(): crush damage is divided down, the value only grows. Returns the added amount.
+local function AddBone(bones, key, bone, dmg, crush)
+	if crush then
+		local c = math.min((1 - bones[key]) / 0.5, 1) -- util.halfValue2(1 - value, 1, 0.5)
+		dmg = dmg / math.max(10 * c * bone, 1)
+	end
+	local old = bones[key]
+	bones[key] = math.min(old + dmg, 1)
+	return bones[key] - old
+end
+
+--- Consequences of a bone that has just broken (`old` = the values before the hit)
+local function BoneEffects(ply, bones, old)
+	local H = Health()
+	local body = WB.GetBody(ply)
+	local broke = false
+
+	for _, key in ipairs({"spine1", "spine2", "spine3"}) do
+		local fake = (key == "spine3") and 0.5 or 1
+		if old[key] < fake and bones[key] >= fake then
+			broke = true
+			if ply.Notify then ply:Notify(BONE_TEXT[key], true, key, 2) end
+			if body and H and H.Fn and H.Fn.AddBodyShock then H.Fn.AddBodyShock(body, 15) end
+		end
+	end
+
+	if old.skull < 1 and bones.skull >= 1 then
+		broke = true
+		if body then
+			body.consciousness = math.max((body.consciousness or 100) - 60, 0)
+			body.brainHealth = math.max((body.brainHealth or 100) - 8, 0)
+			if H and H.Fn and H.Fn.AddBodyShock then H.Fn.AddBodyShock(body, 25) end
+		end
+	end
+
+	if old.pelvis < 1 and bones.pelvis >= 1 then
+		broke = true
+		if body and H and H.Fn and H.Fn.AddBodyShock then H.Fn.AddBodyShock(body, 10) end
+	end
+
+	if broke then
+		ply:EmitSound("bones/bone" .. math.random(8) .. ".mp3", 75, 100, 1, CHAN_AUTO)
+		if hg.LightStunPlayer then timer.Simple(0, function() if IsValid(ply) then hg.LightStunPlayer(ply, 2) end end) end
+	end
+
+	-- broken neck: dies at once (Z-City: spine3 >= 0.8)
+	if old.spine3 < 0.8 and bones.spine3 >= 0.8 and ply:Alive() and hg.BreakNeck then
+		hg.BreakNeck(ply)
+		return
+	end
+
+	if broke then WB.Sync(ply, ply.organism) end
+end
+
+--- One hit on the head / torso / abdomen.
+---   kind "hit"    amount = damage of the hit (bullets, blades, blunt, fists ...), dmgInfo = its DamageInfo
+---   kind "impact" amount = C:U impact force (fall, ragdoll collision), dmgInfo = nil
+function WB.BoneHit(ply, limbId, kind, amount, dmgInfo)
+	if limbId ~= "head" and limbId ~= "thorax" and limbId ~= "abdomen" then return false end
+	if not ply:Alive() or not ply.organism then return false end
+
+	local body, limbs = WB.GetBody(ply), WB.GetLimbs(ply)
+	if body and body.isGodMode then return false end
+	local l = limbs and limbs[limbId]
+	if l and l.dismembered then return false end
+
+	local bones = WB.GetBones(ply)
+	local old = table.Copy(bones)
+	local blast = dmgInfo and dmgInfo:IsDamageType(DMG_BLAST)
+	local crush = not (dmgInfo and dmgInfo:IsDamageType(DMG_BULLET + DMG_BUCKSHOT + DMG_BLAST))
+
+	if kind == "hit" then
+		local d = (amount or 0) / 25 -- Z-City: organism damage = damage / 25
+		if d <= 0 then return false end
+
+		if limbId == "head" then
+			local helmet = ply.armors and ply.armors["head"] ~= nil
+			AddBone(bones, "skull", 0.25, d * (helmet and 0.2 or 1), crush)
+			if math.Rand(0, 1) < math.Clamp(d * 0.08, 0, 0.35) * (helmet and 0.5 or 1) then
+				AddBone(bones, "spine3", 0.1, d * 2 * (helmet and 0.5 or 1), crush)
+			end
+		elseif limbId == "thorax" then
+			if math.Rand(0, 1) < math.Clamp(d * 0.05, 0, 0.25) then
+				AddBone(bones, "spine2", 0.1, d * 2 / (blast and 3 or 1), crush)
+			end
+		else -- abdomen
+			AddBone(bones, "pelvis", 1, d * 0.5, crush)
+			if math.Rand(0, 1) < math.Clamp(d * 0.05, 0, 0.25) then
+				AddBone(bones, "spine1", 0.1, d * 2 / (blast and 3 or 1), crush)
+			end
+		end
+	else
+		local jump = (body and body.jumpSpeed) or 6.5
+		local force = amount or 0
+		if limbId == "head" then
+			if force > math.Rand(jump * 4.5, jump * 7) then bones.skull = 1 end
+			if force > math.Rand(jump * 6, jump * 9) then bones.spine3 = 1 end
+		elseif limbId == "thorax" then
+			if force > math.Rand(jump * 5.5, jump * 8.5) then bones.spine2 = 1 end
+		else
+			if force > math.Rand(jump * 4.5, jump * 7.5) then bones.pelvis = 1 end
+			if force > math.Rand(jump * 5.5, jump * 8.5) then bones.spine1 = 1 end
+		end
+	end
+
+	local changed = false
+	for k, v in pairs(bones) do if v ~= old[k] then changed = true break end end
+	if not changed then return false end
+
+	dbg("bones", ply, limbId, kind, bones.skull, bones.spine1, bones.spine2, bones.spine3, bones.pelvis)
+	BoneEffects(ply, bones, old)
+
+	return true
+end
+
 --- Feed one Z-City hit into WoundSystem.
 --- ply      living player (already resolved)
 --- rawDamage damage after armor/penetration, BEFORE Z-City's per-bone bullet multiplier (WoundSystem has its own)
@@ -194,6 +336,11 @@ function WB.ApplyDamage(ply, dmgInfo, bonename, hitgroup, rawDamage, onRagdoll)
 	end
 
 	dbg("damage", ply, limb, damage)
+
+	-- skull / neck / spine / pelvis (bones WoundSystem has no limb for)
+	if ply:Alive() and not dmgInfo:IsDamageType(WB.BoneImmuneDamage) then
+		WB.BoneHit(ply, limb or (hitgroup and WB.HitgroupToWS[hitgroup]), "hit", damage, dmgInfo)
+	end
 
 	-- any weapon hit on the head (firearm, blade, blunt, fists, shrapnel ...): small chance to destroy an eye.
 	-- Not weapons: falls, prop crush, gas / poison, fire, drowning, radiation, acid, shock.
@@ -303,6 +450,7 @@ function WB.ApplyImpact(ply, limbId, force, surface)
 
 	H.ProcessImpactDamage(ply, limbId, force)
 	if surface then WB.SurfaceCut(ply, limbId, force, surface) end
+	WB.BoneHit(ply, limbId, "impact", force)
 
 	if ply.organism then WB.Sync(ply, ply.organism) end
 	dbg("impact", ply, limbId, force)
@@ -445,8 +593,9 @@ function WB.Sync(ply, org)
 	org.pulse = body.heartRate or 70
 	org.shock = math.Clamp((body.shock or 0) * 0.7, 0, 70)
 	org.bleed = math.max(body.totalBleedSpeed or 0, 0)
-	org.canmove = not otrub
-	org.canmovehead = not otrub
+	local bones = WB.GetBones(ply)
+	org.canmove = not otrub and bones.spine2 < 1 and bones.spine3 < 0.5
+	org.canmovehead = not otrub and bones.spine3 < 0.5
 
 	if org.stamina then
 		org.stamina[1] = math.Clamp((body.stamina or 100) / 100, 0, 1) * (org.stamina.max or 180)
@@ -477,8 +626,9 @@ function WB.Sync(ply, org)
 	end
 
 	-- legacy organ hits (bullet trace through the Z-City organs) must not leave anything that Z-City reads as its own health
-	org.spine1, org.spine2, org.spine3 = 0, 0, 0
-	org.pelvis, org.skull = 0, 0
+	-- (the bone values are the bridge ones: WB.BoneHit)
+	org.spine1, org.spine2, org.spine3 = bones.spine1, bones.spine2, bones.spine3
+	org.pelvis, org.skull = bones.pelvis, bones.skull
 	org.chest = (limbs and AnyUnsetFracture(limbs, {"thorax"})) and 1 or 0
 	-- dislocations: the Z-City flags (radial "Fix dislocation", movement, pain, ragdoll arms) follow the C:U limbs
 	local dl, dr, al, ar = false, false, false, false
@@ -493,7 +643,7 @@ function WB.Sync(ply, org)
 	org.larmdislocation, org.rarmdislocation = al, ar
 
 	-- ragdoll decision of WoundSystem as seen by the Z-City fake code
-	local needfake = body.unconscious or body.fallingRagdoll or (org.llegamputated or org.rlegamputated)
+	local needfake = body.unconscious or body.fallingRagdoll or WB.BonesParalyzed(bones) or (org.llegamputated or org.rlegamputated)
 		or org.blood < 2700 or (org.stun or 0) > CurTime()
 	org.needfake = needfake and true or false
 	org.fake = org.needfake
@@ -518,6 +668,7 @@ function WB.ResetOrganism(ent)
 
 	local H = Health()
 	if not (H and H.ResetPlayer) or not H.ResetPlayer(ply) then return false end
+	ply._wbBones = nil -- broken skull / neck / spine heal with the reset
 
 	local org = ply.organism
 	if org then
@@ -986,6 +1137,7 @@ end)
 hook.Add("PlayerSpawn", "ZCity_WoundBridge_Spawn", function(ply)
 	if OverrideSpawn then return end
 	ply._WBGetUpQueued = nil
+	ply._wbBones = nil
 	ply._WBLimbSnapshot = nil
 	ply._wbWoundSig, ply._wbWounds, ply._wbArterial, ply._wbWoundGeo, ply._wbWoundNext = nil, nil, nil, nil, nil
 	ply._wbBandSig, ply._wbBand, ply._wbBandNext = nil, nil, nil
