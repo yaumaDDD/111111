@@ -18,7 +18,7 @@ WoundSystem становится **единственной системой з�
 * **Урон.** Фронтенд Z-City (`homigrad-damage`: броня, пробитие, перенаправление урона с игрока на его рэгдолл, кровь/силы
   удара, хуки `PreHomigradDamage`) работает как раньше, но готовый урон передаётся в `WoundSystem.Health.HandleDamage`.
   Движковый урон блокируется, смерть наступает только через WoundSystem. Урон по рэгдоллу при падении/ударе об объекты
-  (`velocityDamage`) тоже идёт в WoundSystem (`zcity_wounds_collision_scale`, по умолчанию 0.6).
+  (`velocityDamage`) тоже идёт в WoundSystem (`zcity_wounds_collision_scale`, по умолчанию 1).
 * **Рэгдолл.** Собственный рэгдолл WoundSystem отключён: потеря сознания и «падение» создают Z-City fake-рэгдолл
   (`WB.CreateRagdoll`), вставание — `hg.FakeUp` (`WB.RestoreRagdoll`). Повторный `Spawn()` из `FakeUp` больше не запускает
   хуки респавна WoundSystem (раньше именно из-за двух механизмов рэгдолла игрок «баговал» при уроне).
@@ -44,9 +44,37 @@ WoundSystem становится **единственной системой з�
 |---|---|---|
 | `zc_woundsystem_bridge` | 1 | 1 — здоровье у WoundSystem, 0 — старый organism Z-City |
 | `zc_wound_damage_scale` | 1 | множитель урона, передаваемого в WoundSystem |
-| `zcity_wounds_collision_scale` | 0.6 | то же для урона рэгдолла при столкновениях |
+| `zcity_wounds_collision_scale` | 1 | то же для урона рэгдолла при столкновениях |
 | `zc_woundsystem_bridge_debug` | 0 | отладочный вывод моста |
 | `zc_woundsystem_minigames` | 1 | 1 — лечебные свепы запускают мини-игру WoundSystem, эффект только после прохождения; 0 — мгновенное применение |
+
+### Остальные ConVar'ы и команды
+
+**Сервер / мост**
+
+| ConVar / команда | |
+|---|---|
+| `woundsys_enabled` (1) | включить WoundSystem целиком |
+| `woundsys_healing_rate` (1), `woundsys_bleed_rate` (1) | множители регенерации мышц и скорости кровотечения |
+| `woundsys_stamina_drain_scale` (1) | множитель расхода выносливости |
+| `woundsys_shrapnel_input_hz` (20) | лимит вводов мини-игры шрапнели в секунду |
+| `woundsys_dislocation_heal_speed`, `woundsys_bone_heal_speed` | **больше ничего не делают**: вывих не заживает сам, перелом заживает по таймеру Z-City (95 → 0 за 240 с) |
+| `hg_organism_clear` | то же, что «Reset organism» (C-меню → игрок) |
+| `woundsys_dismember <конечность> [ник]` | (админ) оторвать конечность, напр. `arm_L`, `crus_R` |
+| `cu_god` | (админ) бессмертие WS |
+| `woundsys_dev_debug` (0, cheat) | диагностика WS |
+
+**Клиент**
+
+| ConVar / команда | |
+|---|---|
+| `woundsys_open_panel`, клавиша T (`woundsys_woundview_key`) | открыть/закрыть wound view; также кнопка «Examine Body» в радиальном меню Z-City |
+| `woundsys_minigame_fullscreen` (1), `woundsys_minigame_fullscreen_alpha` (235) | полноэкранная мини-игра |
+| `woundsys_ui_scale` (1), `woundsys_visual_quality` (2), `woundsys_lowend_mode` (0) | вид интерфейса WS |
+| `woundsys_moodles_enabled` (1) и `woundsys_moodles_*` | значки-моодлы |
+| `woundsys_clicker_status`, `woundsys_clicker_release` | отладка/сброс захвата курсора wound view |
+
+Админ-панель отладки WS (set blood / fracture / dislocation / shrapnel / oxygen / full heal и др.) находится в меню опций WoundSystem.
 
 ## Мини-игры при применении свепов
 
@@ -78,13 +106,18 @@ WoundSystem становится **единственной системой з�
 
 * Всё писалось без запуска Garry's Mod: синтаксис и логика моста проверены только на заглушках. Баланс урона и ощущения
   (`zc_wound_damage_scale`, `zcity_wounds_collision_scale`) надо подстроить на сервере.
-* Яды, газ и радиация Z-City, еда/питьё, стамина Z-City, «ярость» (`fury13`/`fury16`) и `bigconsumable`/`smallconsumable`/
-  `pluviska` по-прежнему работают на теневом organism и на WoundSystem не влияют (эти SWEP'ы не привязаны).
+* Яды и газ Z-City перенесены в WS (см. «Яды и газ»); не перенесены лёгочный урон вирусного модуля (`sv_virus`) и отравление CO.
+  Еда/питьё, стамина Z-City, «ярость» (`fury13`/`fury16`) и `bigconsumable`/`smallconsumable`/`pluviska` по-прежнему
+  работают на теневом organism и на WoundSystem не влияют (эти SWEP'ы не привязаны).
 * Типы крови Z-City в WoundSystem не моделируются (переливание всегда «совместимо»).
 * Отключение `zc_woundsystem_bridge 0` возвращает легаси-путь Z-City, но WoundSystem при этом продолжит свою работу,
   если его не удалить.
 
 ## Список изменений
+
+Сводка по ветке (файлы, изменённые относительно исходных аддонов): WS — `sv_health.lua`, `sv_constants.lua`, `sv_config.lua`, `sv_resources.lua`, `sh_core.lua`, `sh_limb_muscle.lua`, `cl_health_gui.lua`, `cl_moodles.lua`, `cl_options.lua`, `cl_blood_ui.lua` (новый), `minigames/cl_shrapnel.lua` (новый), `minigames/cl_clip.lua`, `sh_awb_medical_items.lua`, `sh_health_init.lua`; удалены `sv_blood_effects.lua`, `cl_blood_effects.lua`, `sv_deathscreen.lua`. Z-City — `woundbridge/*`, `sv_input.lua`, `sv_organism.lua`, `sv_organs.lua`, `cl_main.lua`, `weapon_hands_sh.lua`, `weapon_hg_coolhands`, `weapon_hg_glassshard.lua`, `legkick/sv_legkick.lua`.
+
+Исходный список (первые этапы):
 
 WoundSystem: `server/sv_health.lua` (экспорты `Health.*`, `ApplyItemToBody`, мост-гейты, рэгдолл через мост),
 `sv_happiness.lua`, `sv_hev_automedic.lua`, `client/cl_health_gui.lua`, `client/cl_sound_manager.lua`.
@@ -95,7 +128,7 @@ bigbandage_sh,bloodbag,fentanyl,mannitol,medkit_sh,morphine,naloxone,needle,pain
 
 ## Вывихи (Z-City структура поверх C:U)
 
-- Флаги Z-City `org.llegdislocation / rlegdislocation / larmdislocation / rarmdislocation` теперь считаются из конечностей WoundSystem (`limb.dislocated` у `thigh/crus/foot` и `arm/forearm/hand`, левая и правая сторона). Вывих рождается в WS (удары, падения) и сам заживает по таймеру WS.
+- Флаги Z-City `org.llegdislocation / rlegdislocation / larmdislocation / rarmdislocation` теперь считаются из конечностей WoundSystem (`limb.dislocated` у `thigh/crus/foot` и `arm/forearm/hand`, левая и правая сторона). Вывих рождается в WS (удары, падения) и не заживает сам: только мини-игра вправления (см. «Вывихи и переломы: таймеры»).
 - Штраф движения ×0.75 на каждую вывихнутую ногу и боль при беге остаются (боль уходит в WS-боль конечности); руки блокируют хват в fake-рагдолле, как в Z-City.
 - Челюсть удалена полностью: нет `org.jaw`, `jawdislocation`, радиального пункта и ветки `hg_fixdislocation 3`, перелома челюсти, искажения речи и боли при разговоре. Хитбоксы челюсти Z-City считаются черепом. В WS голова больше не вывихивается (раньше это был вывих челюсти), мудл «Dislocated jaw» убран, у «Disfigured» текст «челюсть» заменён на «лицо». Остались только имена костей `jaw` для привязки к голове и лицевые флексы модели (косметика).
 
@@ -164,3 +197,33 @@ bigbandage_sh,bloodbag,fentanyl,mannitol,medkit_sh,morphine,naloxone,needle,pain
   - **любой бинт / перевязка** на сломанной конечности (эффект `boneHealTimer` предмета) или наложенная **шина** «вправляет» кость: `boneHealTimer` → 95, дальше он идёт вниз со скоростью 100/240 в секунду и через ~228 с кость срастается (`Const.FractureSetTimer`, `Const.FractureHealSeconds` в `sv_health.lua`). Ускорители (шина ×2,5, `woundsys_bone_heal_speed`, прибавки `boneHealTimer` у предметов) убраны;
   - бинт можно наложить на сломанную конечность и без кровотечения: кнопка **APPLY BANDAGE** в wound view и выбор конечности бинтом из рук учитывают непросвеченный перелом (`broken` и `boneHealTimer > 95`);
   - теневой организм Z-City показывает такую кость как 1 (`org.lleg/rleg/larm/rarm/chest`), поэтому проверки Z-City-бинта (`org.lleg == 1` …) и HUD-афликции Z-City видят перелом.
+
+## Что проверить в игре (чек-лист)
+
+Всё написано без запуска Garry's Mod: проверен только синтаксис Lua. Ниже порядок проверки, от простого к сложному. Для тестов удобны админ-панель отладки WS (меню опций) и `zc_woundsystem_bridge_debug 1` (лог моста в консоль сервера).
+
+**0. Запуск.** Оба аддона в `garrysmod/addons/`, сервер стартует без ошибок Lua в консоли (особенно `sv_health.lua`, `cl_health_gui.lua`, `sv_woundbridge.lua`). Игрок спавнится, `T` открывает wound view, в радиальном меню есть «Examine Body» (работает и без урона).
+
+**1. Урон и рэгдолл.** Выстрел/удар/взрыв/падение/столкновение рэгдолла: урон идёт в WS (боль, кровь, шок), рэгдолл не «беснуется» при уроне. Подобрать `zc_wound_damage_scale` и `zcity_wounds_collision_scale`. Смерть — стандартный экран Z-City (экрана смерти WS нет).
+
+**2. Кровь.** Видна только кровь Z-City: капли/струи по конечностям, артерия при сильном кровотечении, голова/грудь/живот тоже; жгут и бинт уменьшают/останавливают кровь; эффектов крови C:U нет.
+
+**3. Бинты (из рук).** `weapon_bandage_sh` / `weapon_bigbandage_sh` / аптечка (режим 1): мини-игра на весь экран с процентом остатка; остаток SWEP убывает плавно и совпадает с процентом; управление блокируется, курсор включён; выход ПКМ/ESC; без кровотечения (и без перелома/шрапнели) бинт не тратится.
+
+**4. Бинт из wound view.** На кровоточащей/осколочной/сломанной конечности кнопка APPLY BANDAGE; на забинтованной — REMOVE BANDAGE; кнопки идут столбиком и не перекрываются; бинт рисуется на модели как в Z-City; на конечности с осколками бинт даёт «запечатанное» заражение (растёт, дезинфекция не помогает), после снятия бинта/извлечения осколков спадает; из закрытого и открытого wound view мини-игра запускается.
+
+**5. Шприцы и препараты.** Морфин/фентанил/налоксон/игла/адреналин/бета-блокатор/маннитол/тиамин/аптечка 2–5: мини-игра шприца, доза регулируется самим игроком; жгут — мгновенно; пакет крови — переливание обоим направлениям.
+
+**6. Шрапнель и стекло.** Дробовик оставляет осколки, остальной огнестрел — нет; стекло (окно, бутылка, осколок в руке, удар ногой/рукой в рэгдолле по стеклу) оставляет 3–5 осколков; кнопка SHRAPNEL открывает мини-игру, извлечение только руками; клик по пустому месту закрывает wound view; затемнения подложки нет.
+
+**7. Вывихи.** Вывих возникает при ударах/падениях на ноги и руки; штраф ходьбы и боль при беге; кнопка «FIX DISLOCATION» вправляет только нужную сторону (левая/правая нога/рука), только мини-игра руками; **ни время, ни бинт/шина/bruise kit вывих не лечат**; челюсти нет нигде.
+
+**8. Переломы.** Перелом не срастается сам; бинт (или шина) на сломанную конечность, даже без кровотечения, «вправляет» кость, дальше ~228 секунд до срастания; до обработки кнопка APPLY BANDAGE доступна.
+
+**9. Яды и газ.** Цианидный баллон (`ent_hg_cyanide_canister`): через ~30 с после вдоха дыхание останавливается и игрок постепенно задыхается (сознание → мозг → смерть); без маски `mask2` газ повреждает лёгкие, в маске/классе Combine — нет; яды `weapon_traitor_poison1/2/3` и KCN-капсула действуют по таймингам Z-City; задержка дыхания работает и отпускается при низком кислороде; Reset organism всё снимает.
+
+**10. Reset organism.** C-меню → игрок → «Reset organism» и `hg_organism_clear`: новое тело, раны/яды/лёгкие сброшены, игрок поднимается из рэгдолла.
+
+**11. Прочее.** Моодлы WS, звуки боли, мимика, эффекты экрана; никакого чата/голоса/happiness/HEV/healthchargers/self-harm/skills WS; приватность репозитория (GitHub-настройки вручную).
+
+Если что-то из этого не работает — пришлите текст ошибки из консоли (сервер и клиент) и номер пункта.
