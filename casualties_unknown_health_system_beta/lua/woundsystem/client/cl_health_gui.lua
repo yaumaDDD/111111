@@ -793,6 +793,10 @@ if not (WoundSystem and WoundSystem.MinigameClip) and file.Exists("woundsystem/c
     include("woundsystem/client/minigames/cl_clip.lua")
 end
 
+if not (WoundSystemShrapnelMinigame and WoundSystemShrapnelMinigame._Loaded) and file.Exists("woundsystem/client/minigames/cl_shrapnel.lua", "LUA") then
+    include("woundsystem/client/minigames/cl_shrapnel.lua")
+end
+
 if not (WoundSystemDislocationMinigame and WoundSystemDislocationMinigame._Loaded) and file.Exists("woundsystem/client/minigames/cl_dislocation.lua", "LUA") then
     include("woundsystem/client/minigames/cl_dislocation.lua")
 end
@@ -944,6 +948,7 @@ Icons = {
     infection_down = PaddedMaterial(iconPath .. "infectiondown.png"),
     infectionneutral = PaddedMaterial(iconPath .. "infection.png"),
     disinfected = PaddedMaterial(iconPath .. "disinfected.png"),
+    shrapnel = PaddedMaterial(iconPath .. "shrapnel.png"),
     dislocate = PaddedMaterial(iconPath .. "dislocatedbone.png"),
     disfiguredExpWound = WoundSystemBloodVariantMaterial(iconPath .. "disfiguredExpWound.png", iconPath .. "disfiguredexpwound_red.png"),
     fracture = PaddedMaterial(iconPath .. "fracturedbone.png"),
@@ -1028,7 +1033,7 @@ WoundSystemLimbUIConfig = {
         StepX = 50,
         StepY = 0.2
     },
-    ActionPoint = {
+    ShrapnelPoint = {
         Width = 180,
         Height = 60,
         OffsetX = 0,
@@ -1038,6 +1043,7 @@ WoundSystemLimbUIConfig = {
         Alpha = 255,
         HoverAlpha = 255,
         ActiveAlpha = 255,
+        Text = "REMOVE SHRAPNEL",
         TextEnabled = true,
         TextFont = "RetroTooltipDesc",
         TextOffsetX = -85,
@@ -1046,6 +1052,16 @@ WoundSystemLimbUIConfig = {
         TextHoverColor = Color(255, 255, 255, 255),
         TextActiveColor = Color(255, 255, 255, 255),
         Actions = {
+            SHRAPNEL = {
+                Text = "REMOVE SHRAPNEL",
+                TooltipKey = "removeshrapnel",
+                Width = 180,
+                Height = 60,
+                OffsetX = 0,
+                OffsetY = -30,
+                TextOffsetX = -85,
+                TextOffsetY = -20
+            },
             TOURNIQUET = {
                 Text = "REMOVE TOURNIQUET",
                 TooltipKey = "removetourniquet",
@@ -1195,6 +1211,7 @@ WoundSystemCasTooltipText = {
     hplimbbleed = {"Limb bleeding", ""},
     hplimbforce = {"Limb strength", "The limb's total ability to move and exert force"},
     removetourniquet = {"Remove tourniquet", ""},
+    removeshrapnel = {"Remove shrapnel", "Try to remove shrapnel by hand"},
     removesplint = {"Remove splint", "Take off the splint from the limb"},
     fixdislocation = {"Fix dislocation", "Try to correct the dislocation by hand"}
 }
@@ -1368,6 +1385,7 @@ local defaultLimbState = {
     bleed = 0, 
     infection = 0,
     infectionSpeed = 0, 
+    shrapnel = 0,
     disinfectTime = 0,
     dislocated = false,
     broken = false, 
@@ -1749,6 +1767,7 @@ end
 
 function WoundSystemIsAnyWoundMinigameActive()
     local minigames = {
+        WoundSystemShrapnelMinigame,
         WoundSystemDislocationMinigame,
         WoundSystemBandageMinigame,
         WoundSystemSyringeMinigame,
@@ -1767,6 +1786,7 @@ end
 
 local function CloseWoundMinigames(reason)
     local minigames = {
+        WoundSystemShrapnelMinigame,
         WoundSystemDislocationMinigame,
         WoundSystemBandageMinigame,
         WoundSystemSyringeMinigame,
@@ -1791,6 +1811,20 @@ local function ShouldShowInfectionIndicator(limbId, infection)
     end
 
     return GUIState.InfectionIconLatched[limbId] == true and infection >= 1
+end
+
+local function RequestShrapnelMinigameStart(limbId, slotIdx)
+    if not limbId or limbId == "" then return end
+
+    if WoundSystemShrapnelMinigame and WoundSystemShrapnelMinigame.RequestStart then
+        WoundSystemShrapnelMinigame.RequestStart(limbId, slotIdx)
+        return
+    end
+
+    net.Start("WoundSystem_ShrapnelStart")
+        net.WriteString(limbId)
+        net.WriteUInt(slotIdx or 0, 3)
+    net.SendToServer()
 end
 
 local function RequestDislocationMinigameStart(limbId, slotIdx)
@@ -1960,6 +1994,16 @@ local function UseMedicalToolOnLimb(tool, slotIdx, limbId)
         return false
     end
 
+    if use and use.minigame == "shrapnel" then
+        local minDur = use.minDurability or 0
+        if state and (state.shrapnel or 0) > 0 and tool.durability > minDur then
+            RequestShrapnelMinigameStart(limbId, slotIdx)
+            return true
+        end
+
+        return false
+    end
+
     if use then
         local maxDur = GetToolMax(tool.toolName)
         local minDur = use.minDurability or use.durabilityCost or 0
@@ -2114,6 +2158,7 @@ net.Receive("WoundSystem_UpdateLimb", function()
     state.bleed = net.ReadFloat()
     state.infection = net.ReadFloat()
     state.infectionSpeed = net.ReadFloat()
+    state.shrapnel = net.ReadUInt(4) 
     state.disinfectTime = net.ReadFloat()
     state.broken = net.ReadBool()     
     state.dislocated = net.ReadBool() 
@@ -3705,20 +3750,22 @@ end
 WoundSystemActionButtonPos = WoundSystemActionButtonPos or {x = nil, y = nil}
 
 function WoundSystemDrawLimbActionPoint(limbId, state, pointPos, bX, bY, scale, dollScale, mx, my, isClicking, lastMouseState, minigameActive)
-    local actionStatus = nil
+    local actionStatus = "SHRAPNEL"
 
     if state.customStatuses and state.customStatuses["TOURNIQUET"] then
         actionStatus = "TOURNIQUET"
+    elseif (state.shrapnel or 0) > 0 then
+        actionStatus = "SHRAPNEL"
     elseif state.customStatuses and state.customStatuses["SPLINTED"] then
         actionStatus = "SPLINTED"
     elseif state.dislocated then
         actionStatus = "DISLOCATION"
     end
 
-    if not actionStatus then return end
+    if actionStatus == "SHRAPNEL" and (state.shrapnel or 0) <= 0 then return end
     if actionStatus == "DISLOCATION" and not state.dislocated then return end
 
-    local pointCfg = WoundSystemLimbUIConfig.ActionPoint or {}
+    local pointCfg = WoundSystemLimbUIConfig.ShrapnelPoint or {}
     local actionCfg = (pointCfg.Actions and pointCfg.Actions[actionStatus]) or {}
     local pointW = (actionCfg.Width or pointCfg.Width or pointCfg.Size or 32) * scale
     local pointH = (actionCfg.Height or pointCfg.Height or pointCfg.Size or 32) * scale
@@ -3740,7 +3787,8 @@ function WoundSystemDrawLimbActionPoint(limbId, state, pointPos, bX, bY, scale, 
     local pointCenterY = actionButtonPos.y
     local pointX = pointCenterX - (pointW * 0.5)
     local pointY = pointCenterY - (pointH * 0.5)
-    local hoveringPoint = mx >= pointX and mx <= (pointX + pointW) and my >= pointY and my <= (pointY + pointH)
+    local pad = 14 * scale
+    local hoveringPoint = mx >= pointX - pad and mx <= (pointX + pointW + pad) and my >= pointY - pad and my <= (pointY + pointH + pad)
     if hoveringPoint then GUIState.actionPointHovered = true end
     local pointAlpha = minigameActive and (pointCfg.ActiveAlpha or 90) or (hoveringPoint and (pointCfg.HoverAlpha or 255) or (pointCfg.Alpha or 190))
     local pulseScale = hoveringPoint and (pointCfg.HoverScale or 1.12) or 1
@@ -3754,19 +3802,23 @@ function WoundSystemDrawLimbActionPoint(limbId, state, pointPos, bX, bY, scale, 
 
     if pointCfg.TextEnabled ~= false then
         local textColor = minigameActive and (pointCfg.TextActiveColor or Color(86, 221, 132, 120)) or (hoveringPoint and (pointCfg.TextHoverColor or Color(86, 255, 162, 255)) or (pointCfg.TextColor or Color(47, 224, 129, 255)))
-        draw.SimpleText(actionCfg.Text or pointCfg.Text or "", actionCfg.TextFont or pointCfg.TextFont or "CrunchyTechFont", pointCenterX + ((actionCfg.TextOffsetX or pointCfg.TextOffsetX or 38) * scale), pointCenterY + ((actionCfg.TextOffsetY or pointCfg.TextOffsetY or -7) * scale), textColor, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+        draw.SimpleText(actionCfg.Text or pointCfg.Text or "REMOVE SHRAPNEL", actionCfg.TextFont or pointCfg.TextFont or "CrunchyTechFont", pointCenterX + ((actionCfg.TextOffsetX or pointCfg.TextOffsetX or 38) * scale), pointCenterY + ((actionCfg.TextOffsetY or pointCfg.TextOffsetY or -7) * scale), textColor, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
     end
 
     if hoveringPoint then
-        local tipTitle, tipDesc = WoundSystemTooltipText(actionCfg.TooltipKey or "")
+        local tipTitle, tipDesc = WoundSystemTooltipText(actionCfg.TooltipKey or "removeshrapnel")
         WoundSystemQueueDirectTooltip("action_" .. actionStatus, tipTitle, tipDesc, 35)
     end
 
     if hoveringPoint and isClicking and not GUIState.lastMouseState and not minigameActive then
-        if actionStatus == "DISLOCATION" then
-            RequestDislocationMinigameStart(limbId)
+        if actionStatus ~= "SHRAPNEL" then
+            if actionStatus == "DISLOCATION" then
+                RequestDislocationMinigameStart(limbId)
+            else
+                RequestRemoveLimbStatus(limbId, actionStatus)
+            end
         else
-            RequestRemoveLimbStatus(limbId, actionStatus)
+            RequestShrapnelMinigameStart(limbId)
         end
     end
 end
@@ -3865,7 +3917,7 @@ hook.Add("HUDPaint", "WoundDollAndPanel", function()
 
             local isHovering = mx > (cx - trueW/2) and mx < (cx + trueW/2) and my > (cy - trueH/2) and my < (cy + trueH/2)
             
-            if isHovering and not minigameActive then
+            if isHovering and not minigameActive and not GUIState.actionPointHoverPrev then
                 hoveredLimbId = limb.id
                 if not GUIState.selectedLimbData or GUIState.selectedLimbData.id ~= limb.id then
                     GUIState.selectedLimbData = { id = limb.id, state = state }
@@ -4025,6 +4077,10 @@ hook.Add("HUDPaint", "WoundDollAndPanel", function()
                 end
             end
 
+            if state.shrapnel > 0 then
+                AddHudIcon(iconItems, Icons.shrapnel, Color(155, 110, 62, limbAlpha))
+            end
+
             if ShouldShowInfectionIndicator(limb.id, state.infection) then
                 local infectionColor = InfectionStatusColor(state.infection, limbAlpha)
                 local displayedInfectionSpeed = GetDisplayedInfectionSpeed(state)
@@ -4097,515 +4153,24 @@ hook.Add("HUDPaint", "WoundDollAndPanel", function()
         end
     end
 
-    local panelX = 20 * scale
-    local panelW, panelH = 475 * scale, 810 * scale
-    local panelCenterY = (20 * scale) + (panelH / 2) 
-    local currentPanelH = panelH * smoothProgress
-    
-    SetGuiMaterial(mats.compback)
-    surface.SetDrawColor(255, 255, 255, 255)
-    DrawRectInt(panelX, panelCenterY - (currentPanelH / 2), panelW, currentPanelH)
-    
-    if smoothProgress > 0.05 then
-        local textX, textY = panelX + (25 * scale), (20 * scale) + (25 * scale)
-        render.SetScissorRect(panelX, panelCenterY - (currentPanelH / 2), panelX + panelW, panelCenterY + (currentPanelH / 2), true)
-            
-            SetGuiMaterial(mats.screenStatic)
-            surface.SetDrawColor(255, 255, 255, 255)
-            DrawRectInt(panelX + (12 * scale), textY - (-50 * scale), 380 * scale, 470 * scale)
-
-            draw.SimpleText("UNI-HEALTH v2.03", "TechScannerFont", textX + (48 * scale), textY + (43 * scale), Color(86, 221, 132))
-            draw.SimpleText(LocalPlayer():Nick():upper(), "TechScannerFont", textX + (-8 * scale), textY + (-18 * scale), Color(86, 221, 132))
-            
-            local bloodPressureAsystole = CardioState.bloodPressure * 0.66
-            local radiationGy = (CardioState.radiationSickness or 0) * 0.3
-            
-            -- Blood Oxygen and Heart Rate
-            draw.SimpleText(math.Round(CardioState.bloodOxygen) .. "%", "TechScannerSmall", textX + (330 * scale), textY + (427 * scale), Color(86, 221, 132), TEXT_ALIGN_RIGHT)
-            draw.SimpleText(math.Round(CardioState.heartRate) .. " | " .. math.Round(CardioState.bloodPressure) .. "/" .. math.Round(bloodPressureAsystole), "TechScannerSmall", textX + (23 * scale), textY + (427 * scale), Color(86, 221, 132), TEXT_ALIGN_LEFT)
-			draw.SimpleText(math.Round(CardioState.respiratoryRate * 0.25) .. "/m", "TechScannerSmall", textX + (3 * scale), textY + (388 * scale), Color(86, 221, 132), TEXT_ALIGN_LEFT)
-			draw.SimpleText("gy", "TechScannerSmall", textX + (353 * scale), textY + (383 * scale), Color(86, 221, 132), TEXT_ALIGN_RIGHT)
-			draw.SimpleText(string.format("%.1f", radiationGy), "TechScannerSmall", textX + (330 * scale), textY + (383 * scale), Color(86, 221, 132), TEXT_ALIGN_RIGHT)
-            WoundSystemQueueLocaleTooltip("hpoxygenamount", textX + (260 * scale), textY + (414 * scale), 95 * scale, 32 * scale, mx, my, 10)
-            WoundSystemQueueLocaleTooltip("hpheartrate", textX + (12 * scale), textY + (414 * scale), 75 * scale, 32 * scale, mx, my, 10)
-            WoundSystemQueueLocaleTooltip("hppressure", textX + (84 * scale), textY + (414 * scale), 145 * scale, 32 * scale, mx, my, 10)
-            WoundSystemQueueLocaleTooltip("hprr", textX + (-4 * scale), textY + (374 * scale), 85 * scale, 32 * scale, mx, my, 10)
-            WoundSystemQueueLocaleTooltip("hpradiation", textX + (275 * scale), textY + (374 * scale), 85 * scale, 32 * scale, mx, my, 10)
-
-            -- Temperature text and Bar
-            local tempVal = string.format("%.1f", CardioState.temperature) .. "'c"
-            draw.SimpleText(tempVal, "TechScannerSmall", textX + (255 * scale), textY + (178 * scale), Color(47, 224, 129), TEXT_ALIGN_LEFT)
-			
-            -- Brain Health Bar
-			local brainPct = WoundSystem.Client.PixelSnapFill(mats.barBrain, (CardioState.brainHealth or 100) / 100, false)
-
-			local brainBarW = 289 * scale
-			local brainBarH = 6 * scale
-			local brainBarX = textX + (59 * scale)
-			local brainBarY = textY + (83 * scale)
-
-			-- Background
-			surface.SetDrawColor(0, 0, 0, 0)
-			surface.DrawRect(brainBarX, brainBarY, brainBarW, brainBarH)
-
-			-- Fill
-			SetGuiMaterial(mats.barBrain)
-			surface.SetDrawColor(255, 255, 255, 255)
-
-			DrawRectUVInt(
-				brainBarX,
-				brainBarY,
-				brainBarW * brainPct,
-				brainBarH,
-				0,
-				0,
-				brainPct,
-				1
-			)
-            
-            WoundSystemQueueLocaleTooltip("hpbrainhealth", textX + (46 * scale), textY + (78 * scale), 120 * scale, 32 * scale, mx, my, 10)
-            WoundSystemQueueLocaleTooltip("hpconsciousness", textX + (225 * scale), textY + (78 * scale), 130 * scale, 32 * scale, mx, my, 10)
-
-            local tPct = WoundSystem.Client.PixelSnapFill(mats.barThermometer, (CardioState.temperature - 28) * 0.08, true)
-            local tBarW, tBarH = 19 * scale, 82 * scale
-            local tBarX, tBarY = textX + (331 * scale), textY + (160 * scale)
-            surface.SetDrawColor(255, 255, 255, 255)
-            SetGuiMaterial(mats.barThermometer)
-            DrawRectUVInt(tBarX, tBarY + (tBarH * (1 - tPct)), tBarW, tBarH * tPct, 0, 1 - tPct, 1, 1)
-            WoundSystemQueueLocaleTooltip("hptemperature", textX + (246 * scale), textY + (157 * scale), 110 * scale, 95 * scale, mx, my, 10)
-
-            -- Hemothorax bar
-            local hPct = WoundSystem.Client.PixelSnapFill(mats.barHemothorax, (CardioState.hemothorax or 0) / 100, true)
-            if hPct > 0 then
-                local hInfo = WoundSystemPaddedMaterialInfo[mats.barHemothorax]
-                local hBarW, hBarH = (25 * 2.5) * scale, (18 * 2.5) * scale
-                local hBarX, hBarY = textX + (2 * scale), textY + (339 * scale) 
-                local hDrawPadX = hInfo and (hInfo.pad * (hBarW / hInfo.sourceW)) or 0
-                local hDrawPadY = hInfo and (hInfo.pad * (hBarH / hInfo.sourceH)) or 0
-                
-                local snappedPct = hPct
-                local clipY = hBarY + (hBarH * (1 - snappedPct))
-                
-                local scX1 = panelX
-                local scY1 = panelCenterY - (currentPanelH / 2)
-                local scX2 = panelX + panelW
-                local scY2 = panelCenterY + (currentPanelH / 2)
-                
-                local finalX1 = math.max(scX1, hBarX - hDrawPadX)
-                local finalY1 = math.max(scY1, clipY)
-                local finalX2 = math.min(scX2, hBarX + hBarW + hDrawPadX)
-                local finalY2 = math.min(scY2, hBarY + hBarH + hDrawPadY)
-                
-                if finalY1 < finalY2 then
-                    SetScissorRectInt(finalX1, finalY1, finalX2, finalY2, true)
-                    
-                    surface.SetDrawColor(255, 255, 255, 255)
-                    SetGuiMaterial(mats.barHemothorax)
-                    DrawRectInt(hBarX, hBarY, hBarW, hBarH)
-                    
-                    SetScissorRectInt(scX1, scY1, scX2, scY2, true)
-                end
-            end
-
-            -- ==========================================
-            -- 🫁 LUNG FILL BARS
-            -- ==========================================
-            local lCfg = WoundSystemLungConfig
-            local l_w = lCfg.Width * scale
-            local l_h = lCfg.Height * scale
-            local l_space = lCfg.Distance * scale
-            local l_baseX = textX + (lCfg.OffsetX * scale)
-            local l_baseY = textY + (lCfg.OffsetY * scale)
-
-            -- Updated to use the new UseStamina flag
-            local lungValue = CardioState.bloodOxygen
-            if lCfg.UseStamina then
-                lungValue = CardioState.stamina or 100
-            elseif lCfg.UseRespiratoryRate then
-                lungValue = CardioState.respiratoryRate or 100
-            end
-            local lungPct = math.Clamp(lungValue / 100, 0, 1)
-
-            -- NEW: Split percentage between left and right lungs
-            -- Right lung drains first (from 100% to 50% of total stamina)
-            local rightLungPct = WoundSystem.Client.PixelSnapFill(mats.lungFill, (lungPct - 0.5) * 2, true)
-            -- Left lung drains second (from 50% to 0% of total stamina)
-            local leftLungPct = WoundSystem.Client.PixelSnapFill(mats.lungFill, lungPct * 2, true)
-
-            local leftX = l_baseX - (l_space / 2) - l_w
-            local rightX = l_baseX + (l_space / 2)
-
-            -- Configurable Flip Coordinates
-            local lU1 = lCfg.FlipLeftHorizontal and 1 or 0
-            local lU2 = lCfg.FlipLeftHorizontal and 0 or 1
-            local lV1 = lCfg.FlipLeftVertical and 1 or 0
-            local lV2 = lCfg.FlipLeftVertical and 0 or 1
-
-            local rU1 = lCfg.FlipRightHorizontal and 1 or 0
-            local rU2 = lCfg.FlipRightHorizontal and 0 or 1
-            local rV1 = lCfg.FlipRightVertical and 1 or 0
-            local rV2 = lCfg.FlipRightVertical and 0 or 1
-
-            SetGuiMaterial(mats.lungFill)
-
-            -- Background Silhouettes (Draws full size, permanently dark)
-            surface.SetDrawColor(0, 0, 0, 0)
-            DrawRectUVInt(leftX, l_baseY, l_w, l_h, lU1, lV1, lU2, lV2)
-            DrawRectUVInt(rightX, l_baseY, l_w, l_h, rU1, rV1, rU2, rV2)
-
-            -- Ensure we don't draw outside the main panel bounds during the slide-up animation
-            local pScX1 = panelX
-            local pScY1 = panelCenterY - (currentPanelH / 2)
-            local pScX2 = panelX + panelW
-            local pScY2 = panelCenterY + (currentPanelH / 2)
-
-            -- Calculate Scissor Box for the LEFT Lung
-            local l_scX1, l_scY1, l_scX2, l_scY2
-            if lCfg.FillFromBottom then
-                l_scX1 = leftX
-                l_scY1 = l_baseY + l_h * (1 - leftLungPct)
-                l_scX2 = leftX + l_w
-                l_scY2 = l_baseY + l_h
-            else
-                l_scX1 = leftX
-                l_scY1 = l_baseY
-                l_scX2 = leftX + l_w
-                l_scY2 = l_baseY + l_h * leftLungPct
-            end
-
-            local finalLX1 = math.max(l_scX1, pScX1)
-            local finalLY1 = math.max(l_scY1, pScY1)
-            local finalLX2 = math.min(l_scX2, pScX2)
-            local finalLY2 = math.min(l_scY2, pScY2)
-
-            if finalLY1 < finalLY2 and finalLX1 < finalLX2 then
-                -- Apply the custom intersection scissor for the LEFT lung
-                render.SetScissorRect(finalLX1, finalLY1, finalLX2, finalLY2, true)
-                surface.SetDrawColor(lCfg.Color.r, lCfg.Color.g, lCfg.Color.b, lCfg.Color.a)
-                DrawRectUVInt(leftX, l_baseY, l_w, l_h, lU1, lV1, lU2, lV2)
-            end
-
-            -- Calculate Scissor Box for the RIGHT Lung
-            local r_scX1, r_scY1, r_scX2, r_scY2
-            if lCfg.FillFromBottom then
-                r_scX1 = rightX
-                r_scY1 = l_baseY + l_h * (1 - rightLungPct)
-                r_scX2 = rightX + l_w
-                r_scY2 = l_baseY + l_h
-            else
-                r_scX1 = rightX
-                r_scY1 = l_baseY
-                r_scX2 = rightX + l_w
-                r_scY2 = l_baseY + l_h * rightLungPct
-            end
-
-            local finalRX1 = math.max(r_scX1, pScX1)
-            local finalRY1 = math.max(r_scY1, pScY1)
-            local finalRX2 = math.min(r_scX2, pScX2)
-            local finalRY2 = math.min(r_scY2, pScY2)
-
-            if finalRY1 < finalRY2 and finalRX1 < finalRX2 then
-                -- Apply the custom intersection scissor for the RIGHT lung
-                render.SetScissorRect(finalRX1, finalRY1, finalRX2, finalRY2, true)
-                surface.SetDrawColor(lCfg.Color.r, lCfg.Color.g, lCfg.Color.b, lCfg.Color.a)
-                DrawRectUVInt(rightX, l_baseY, l_w, l_h, rU1, rV1, rU2, rV2)
-            end
-
-            -- Restore the main UI panel scissor rect!
-            render.SetScissorRect(pScX1, pScY1, pScX2, pScY2, true)
-            WoundSystemQueueLocaleTooltip(lCfg.UseStamina and "hpstamina" or "hpoxygenamount", leftX - (8 * scale), l_baseY - (8 * scale), (l_w * 2) + l_space + (16 * scale), l_h + (16 * scale), mx, my, 10)
-            -- ==========================================
-
-            -- Systemic pain
-            local painDisplay = math.Clamp(math.Round(CardioState.avgPain or 0), 0, 100)
-            draw.SimpleText(painDisplay .. "%", "TechScannerFont", textX + (335 * scale), textY + (119 * scale), Color(86, 221, 132), TEXT_ALIGN_RIGHT)
-            WoundSystemQueueLocaleTooltip("hppain", textX + (246 * scale), textY + (106 * scale), 110 * scale, 36 * scale, mx, my, 10)
-            
-            -- Immunity
-            local currentImmunity = math.Round(CardioState.immunity or 100)
-            local immColor = Color(47, 224, 129)
-            local happiness = LocalPlayer():GetNWFloat("WoundSystem_Happiness", 0)
-            draw.SimpleText(currentImmunity .. "%", "TechScannerSmall", textX + (215 * scale), textY + (125 * scale), immColor, TEXT_ALIGN_RIGHT)
-			draw.SimpleText(math.Round(happiness, 1), "TechScannerFont", textX + (320 * scale), textY + (250 * scale), Color(86, 221, 132), TEXT_ALIGN_RIGHT)
-            WoundSystemQueueLocaleTooltip("hpimmunity", textX + (140 * scale), textY + (112 * scale), 95 * scale, 32 * scale, mx, my, 10)
-            WoundSystemQueueLocaleTooltip("hphappiness", textX + (245 * scale), textY + (238 * scale), 105 * scale, 34 * scale, mx, my, 10)
-            if WoundSystemDrawMoodIcon then
-                WoundSystemDrawMoodIcon(textX + (325 * scale), textY + (252 * scale), scale)
-            end
-			draw.SimpleText(math.Round(math.Clamp(CardioState.energy or 100, 0, 100)) .. "%", "TechScannerFont", textX + (320 * scale), textY + (285 * scale), Color(86, 221, 132), TEXT_ALIGN_RIGHT)
-			draw.SimpleText(math.Round(math.Clamp(CardioState.sicknessAmount or 0, 0, 100)) .. "%", "TechScannerFont", textX + (60 * scale), textY + (250 * scale), Color(86, 221, 132), TEXT_ALIGN_LEFT)
-			draw.SimpleText("52.5kg", "TechScannerFont", textX + (60 * scale), textY + (282 * scale), Color(86, 221, 132), TEXT_ALIGN_LEFT)
-            WoundSystemQueueLocaleTooltip("hpenergy", textX + (245 * scale), textY + (275 * scale), 105 * scale, 34 * scale, mx, my, 10)
-            WoundSystemQueueLocaleTooltip("hpsickness", textX + (40 * scale), textY + (238 * scale), 90 * scale, 34 * scale, mx, my, 10)
-            WoundSystemQueueLocaleTooltip("hpweight", textX + (40 * scale), textY + (275 * scale), 110 * scale, 34 * scale, mx, my, 10)
-
-            local brainHealth = math.Round(CardioState.brainHealth or 100)
-            local consciousness = math.Round(CardioState.consciousness or 100)
-            local brainColor = CardioState.unconscious and Color(47, 224, 129) or Color(47, 224, 129)
-            draw.SimpleText(brainHealth, "TechScannerFont", textX + (55 * scale), textY + (90 * scale), brainColor, TEXT_ALIGN_LEFT)
-            draw.SimpleText(consciousness .. "%", "TechScannerFont", textX + (335 * scale), textY + (93 * scale), brainColor, TEXT_ALIGN_RIGHT)
-            
-            local bloodPct = LocalPlayer():GetNWFloat("BloodAmount", 100)
-            local liters = 2.5 + (bloodPct * 0.025)
-            local bloodLiters = string.format("%.2f" .. "l", liters)
-            
-            draw.SimpleText(bloodLiters, "TechScannerSmall", textX + (45 * scale), textY + (125 * scale), Color(86, 221, 132))
-            WoundSystemQueueLocaleTooltip("hpbloodvolume", textX + (35 * scale), textY + (112 * scale), 130 * scale, 32 * scale, mx, my, 10)
-			local totalDrain = CardioState.totalBleedSpeed or 0
-
-			if totalDrain > 0.01 then
-				local totalDrainText = string.format("%.2fl/m", totalDrain)
-				draw.SimpleText(totalDrainText, "TechScannerSmall", textX + (45 * scale), textY + (155 * scale), Color(86, 221, 132))
-			end
-            WoundSystemQueueLocaleTooltip("hpbleedspeed", textX + (35 * scale), textY + (145 * scale), 150 * scale, 32 * scale, mx, my, 10)
-
-            local vitalsX = textX + (-8 * scale)
-            local vitalsY = textY + (7 * scale)
-            draw.SimpleText(GUIState.cachedVitals, "TechScannerSmall", vitalsX, vitalsY, Color(86, 221, 132))
-
-            -- Render sweep
-
-            local ecgW, ecgH = 340 * scale, 120 * scale
-            local renderEcgX, renderEcgY = textX + (5 * scale), textY + (500 * scale)
-            local stepX = ecgW / ECG.points
-            WoundSystemQueueLocaleTooltip("hpecg", renderEcgX, renderEcgY - (ecgH * 0.55), ecgW, ecgH, mx, my, 10)
-            
-            -- Made the gap slightly larger so the fade out doesn't hit a hard wall
-            local gapSize = math.floor(ECG.points * -0.2) 
-            local head = math.floor(ECG.writeIndex)
-            local fibRatio = math.Clamp((CardioState.fibrillationProgress or 0) / 100, 0, 1)
-
-            local prevX, prevY
-            for i = 1, ECG.points do
-                local readIdx = i
-                
-                -- dist: distance forward from the write head (0 = head, increasing forward)
-                local dist = (i - head) % ECG.points
-                
-                -- age: how old the pixel is (0 = brand new, ECG.points = oldest)
-                local age = (ECG.points - dist) % ECG.points
-                
-                -- Gap logic (immediately in front of the head)
-                if dist < gapSize then
-                    prevX, prevY = nil, nil
-                    continue 
-                end
-                
-                -- NEW: Phasing / Comet Tail Fade
-                -- Using math.pow creates a curve so it stays visible longer, then fades out smoothly
-                local lifeFade = 1 - math.pow((age / ECG.points), 1.2)
-                local pointAlpha = 255 * lifeFade
-                
-                local px = renderEcgX + (i - 1) * stepX
-                local py = renderEcgY - (ECG.buffer[readIdx] * ecgH * 0.4)
-                
-                if prevX then 
-                    local r = fibRatio > 0.6 and Lerp((fibRatio - 0.6) * 2.5, 47, 255) or 47
-                    local g = fibRatio > 0.6 and Lerp((fibRatio - 0.6) * 2.5, 224, 50) or 224
-                    local b = fibRatio > 0.6 and Lerp((fibRatio - 0.6) * 2.5, 129, 50) or 129
-                    
-                    -- BASE THICK LINE (5 passes total instead of 3)
-                    surface.SetDrawColor(r, g, b, pointAlpha)
-                    surface.DrawLine(prevX, prevY, px, py)
-                    surface.DrawLine(prevX, prevY - 1, px, py - 1)
-                    surface.DrawLine(prevX, prevY + 1, px, py + 1)
-                    surface.DrawLine(prevX, prevY - 2, px, py - 2) -- Thicker!
-                    surface.DrawLine(prevX, prevY + 2, px, py + 2) -- Thicker!
-                    
-                    -- NEW: FRONT GLOW EFFECT (Bloom)
-                    -- If the point is in the newest 15% of the line, draw a wide, semi-transparent aura around it
-                    local glowRange = ECG.points * 0.15
-                    if age < glowRange then
-                        local glowAlpha = (1 - (age / glowRange)) * 80 -- Max 80 alpha for a soft bloom
-                        surface.SetDrawColor(r, g, b, glowAlpha * lifeFade)
-                        
-                        -- Draw outer passes for the "glow"
-                        surface.DrawLine(prevX, prevY - 3, px, py - 3)
-                        surface.DrawLine(prevX, prevY + 3, px, py + 3)
-                        surface.DrawLine(prevX, prevY - 4, px, py - 4)
-                        surface.DrawLine(prevX, prevY + 4, px, py + 4)
-                    end
-                end
-                prevX, prevY = px, py
-            end
-
-            local bScrX, bScrY = panelX + (10 * scale), panelCenterY + (180 * scale)
-            SetGuiMaterial(mats.screenSmallStatic)
-            surface.SetDrawColor(255, 255, 255, 255)
-            DrawRectInt(bScrX, bScrY, 380 * scale, 185 * scale)
-            
-            local bX, bY = bScrX + (30 * scale), bScrY + (20 * scale)
-            local pct = WoundSystem.Client.PixelSnapFill(mats.barBlood, liters / 5, true)
-            local barW = 8 * scale
-            local barH = 53 * scale
-            local startX = bX + (-13 * scale)
-            local startY = bY + (-455 * scale) 
-
-            SetGuiMaterial(mats.barBlood)
-            surface.SetDrawColor(255, 255, 255, 255)
-            DrawRectUVInt(startX, startY + (barH - (barH * pct)), barW, barH * pct, 0, 1 - pct, 1, 1)    
-			
-            local barW = 150 * scale
-            local barH = 4.3 * scale
-            local foodX, foodY = bX + (16 * scale), bY + (-339 * scale)
-            local thirstX, thirstY = bX + (16 * scale), bY + (-370 * scale)
-            local thirstValue = math.Clamp(CardioState.thirst or 100, 0, 100)
-            local hungerValue = math.Clamp(CardioState.hunger or 100, 0, 100)
-            local thirstPct = WoundSystem.Client.PixelSnapFill(mats.barThirst, thirstValue / 100, false)
-            local hungerPct = WoundSystem.Client.PixelSnapFill(mats.barFood, hungerValue / 100, false)
-
-            surface.SetDrawColor(0, 0, 0, 0)
-            surface.DrawRect(thirstX, thirstY, barW, barH) 
-            surface.SetDrawColor(47, 224, 129, 255)
-            surface.DrawRect(thirstX, thirstY, math.Round(barW * thirstPct), math.Round(barH))
-
-            surface.SetDrawColor(0, 0, 0, 0)
-            surface.DrawRect(foodX, foodY, barW, barH)
-            surface.SetDrawColor(47, 224, 129, 255)
-            surface.DrawRect(foodX, foodY, math.Round(barW * hungerPct), math.Round(barH))
-
-			draw.SimpleText(math.Round(thirstValue), "TechScannerFont", bX + (205 * scale), bY + (-388 * scale), Color(86, 221, 132), TEXT_ALIGN_CENTER)
-			draw.SimpleText(math.Round(hungerValue), "TechScannerFont", bX + (240 * scale), bY + (-355 * scale), Color(86, 221, 132), TEXT_ALIGN_CENTER)
-            WoundSystemQueueLocaleTooltip("hpthirst", thirstX, thirstY - (12 * scale), 260 * scale, 34 * scale, mx, my, 10)
-            WoundSystemQueueLocaleTooltip("hphunger", foodX, foodY - (12 * scale), 260 * scale, 34 * scale, mx, my, 10)
-			
-			
-
-            if GUIState.selectedLimbData then
-                local s = GUIState.selectedLimbData.state
-                draw.SimpleText(WoundSystemPrettyLimbName(GUIState.selectedLimbData.id), "TechScannerFont", bScrX + (180 * scale), bScrY + (-3 * scale), Color(86, 221, 132), TEXT_ALIGN_CENTER)
-                WoundSystemQueueLocaleTooltip("hpselectedlimb", bScrX + (70 * scale), bScrY + (-8 * scale), 230 * scale, 32 * scale, mx, my, 10)
-
-                local barW = 264 * scale
-                local barH = 8.7 * scale
-                local skinX, skinY = bX + (-14 * scale), bY + (53 * scale)
-                local muscX, muscY = bX + (-14 * scale), bY + (24 * scale)
-                local skinPct = WoundSystem.Client.PixelSnapFill(mats.barLimb, (s.skin or 0) / 100, false)
-                local musclePct = WoundSystem.Client.PixelSnapFill(mats.barLimb, (s.muscle or 0) / 100, false)
-
-                surface.SetDrawColor(0, 0, 0, 0)
-                surface.DrawRect(skinX, skinY, barW, barH) 
-                SetGuiMaterial(mats.barLimb)
-                surface.SetDrawColor(255, 255, 255, 255)
-                DrawRectUVInt(skinX, skinY, barW * skinPct, barH, 0, 0, skinPct, 1)
-
-                surface.SetDrawColor(0, 0, 0, 0)
-                surface.DrawRect(muscX, muscY, barW, barH)
-                SetGuiMaterial(mats.barLimb)
-                surface.SetDrawColor(255, 255, 255, 255)
-                DrawRectUVInt(muscX, muscY, barW * musclePct, barH, 0, 0, musclePct, 1)              
-
-                local painText = (s.pain and s.pain > 0) and tostring(math.Round(s.pain)) or "-"
-                local infectionText = ShouldShowInfectionIndicator(GUIState.selectedLimbData.id, s.infection) and tostring(math.Round(s.infection)) or "-"
-
-                draw.SimpleText(painText, "TechScannerFont", bX + (90 * scale), bY + (114 * scale), Color(86, 221, 132))
-                draw.SimpleText(infectionText, "TechScannerFont", bX + (90 * scale), bY + (80 * scale), Color(86, 221, 132))
-				draw.SimpleText(math.Round(s.muscle), "TechScannerFont", bX + (288 * scale), bY + (10 * scale), Color(86, 221, 132), TEXT_ALIGN_CENTER)
-				draw.SimpleText(math.Round(s.skin), "TechScannerFont", bX + (288 * scale), bY + (38 * scale), Color(86, 221, 132), TEXT_ALIGN_CENTER)
-                WoundSystemQueueLocaleTooltip("hpmusclehealth", muscX, muscY - (8 * scale), (barW + 70 * scale), 28 * scale, mx, my, 10)
-                WoundSystemQueueLocaleTooltip("hpskinhealth", skinX, skinY - (8 * scale), (barW + 70 * scale), 28 * scale, mx, my, 10)
-                WoundSystemQueueLocaleTooltip("hplimbpain", bX + (80 * scale), bY + (104 * scale), 80 * scale, 34 * scale, mx, my, 10)
-                WoundSystemQueueLocaleTooltip("hpinfection", bX + (80 * scale), bY + (70 * scale), 100 * scale, 34 * scale, mx, my, 10)
-                
-                local uiCfg = WoundSystemLimbUIConfig
-                
-                -- Fracture/Dislocation UI
-                if s.broken or s.dislocated then
-                    local fCfg = uiCfg.Fracture
-                    local fX = bX + (fCfg.X * scale)
-                    local fY = bY + (fCfg.Y * scale)
-                    
-                    SetGuiMaterial(Icons.fracture2)
-                    surface.SetDrawColor(255, 255, 255, 255)
-                    DrawRectInt(fX, fY, fCfg.Width * scale, fCfg.Height * scale)
-                    WoundSystemQueueLocaleTooltip("hplimbinjury", fX, fY, fCfg.Width * scale, fCfg.Height * scale, mx, my, 10)
-                    
-                    local timerVal = s.broken and (s.boneHealTimer or 0) or (s.dislocationTimer or 0)
-					if timerVal > 0 then
-						-- Get the exact speed multipliers matching your server's default ConVars
-						-- (Or use GetConVar("woundsys_bone_heal_speed"):GetFloat() if synced)
-						local healSpeed = s.broken and 0.043 or 0.07
-
-						-- Convert the raw arbitrary server "units" into actual real-world seconds
-						local realSecondsLeft = timerVal / healSpeed
-
-						-- Now break down the TRUE real-world seconds into minutes and seconds
-						local mins = math.floor(realSecondsLeft / 60)
-						local secs = math.floor(realSecondsLeft % 60)
-						
-						-- Draw the multiline text (unchanged, but now updates every 1 real second!)
-						local tX = fX + (fCfg.TextOffsetX * scale)
-						local tY = fY + (fCfg.TextOffsetY * scale)
-						
-						draw.SimpleText(mins .. "m", "TechScannerFont", tX, tY, Color(86, 221, 132), TEXT_ALIGN_LEFT)
-						draw.SimpleText(secs .. "s", "TechScannerFont", tX, tY + (20 * scale), Color(86, 221, 132), TEXT_ALIGN_LEFT)
-					end
-                end
-				draw.SimpleText(math.Round(s.muscleStrength * 100),  "TechScannerFont", 78 * scale, 687 * scale, Color(86, 221, 132), TEXT_ALIGN_CENTER)				
-				local tPct = WoundSystem.Client.PixelSnapFill(mats.barForce, (s.muscleStrength or 0) / 1, true)
-				local tBarW, tBarH = 56 * scale, 55 * scale
-				local tBarX, tBarY = 47 * scale, 722 * scale
-				surface.SetDrawColor(255, 255, 255, 255)
-				SetGuiMaterial(mats.barForce)
-				DrawRectUVInt(tBarX, tBarY + (tBarH * (1 - tPct)), tBarW, tBarH * tPct, 0, 1 - tPct, 1, 1)				
-                WoundSystemQueueLocaleTooltip("hplimbforce", tBarX, tBarY - (30 * scale), 95 * scale, (tBarH + 35 * scale), mx, my, 10)
-			
-                -- Bleed UI
-                if s.bleed > 0.1 then
-                    local bCfg = uiCfg.Bleed
-                    local blX = bX + (bCfg.X * scale)
-                    local blY = bY + (bCfg.Y * scale)
-                    
-                    SetGuiMaterial(Icons.limbbleedouter)
-                    surface.SetDrawColor(255, 255, 255, 255)
-                    DrawRectInt(blX, blY, bCfg.OuterWidth * scale, bCfg.OuterHeight * scale)
-                    
-                    local bleedRate = ClientLimbBleedRate(s)
-                    -- Fill from bottom based on bleed rate against FillThreshold
-                    local fillPct = WoundSystem.Client.PixelSnapFill(Icons.limbbleed, bleedRate / bCfg.FillThreshold, true)
-                    
-                    if fillPct > 0 then
-                        local inW = bCfg.InnerWidth * scale
-                        local inH = bCfg.InnerHeight * scale
-                        local inX = blX + (bCfg.InnerOffsetX * scale)
-                        local inY = blY + (bCfg.InnerOffsetY * scale)
-                        
-                        SetGuiMaterial(Icons.limbbleed)
-                        surface.SetDrawColor(255, 255, 255, 255)
-                        DrawRectUVInt(inX, inY + (inH * (1 - fillPct)), inW, inH * fillPct, 0, 1 - fillPct, 1, 1)
-                    end
-                    
-                    local tX = blX + (bCfg.TextOffsetX * scale)
-                    local tY = blY + (bCfg.TextOffsetY * scale)
-                    
-                    local rateStr = string.format("%.2f", bleedRate)
-                    draw.SimpleText(rateStr, "TechScannerMedium", tX, tY, Color(86, 221, 132), TEXT_ALIGN_RIGHT)
-
-                    draw.SimpleText("l/m", "TechScannerMedium", tX, tY + (17 * scale), Color(86, 221, 132), TEXT_ALIGN_RIGHT)
-                    WoundSystemQueueLocaleTooltip("hplimbbleed", blX, blY, bCfg.OuterWidth * scale, bCfg.OuterHeight * scale, mx, my, 10)
-                end
-
-                WoundSystemDrawLimbActionPoint(GUIState.selectedLimbData.id, s, limbScreenPoints[GUIState.selectedLimbData.id], bX, bY, scale, dollScale, mx, my, isClicking, GUIState.lastMouseState, minigameActive)
-            end
-        
-        render.SetScissorRect(0, 0, 0, 0, false)
-        
-        -- (the WoundSystem inventory panel was removed: items are the Z-City SWEPs)
+    -- (the left "UNI-HEALTH" status panel was removed; only the action button of the selected limb stays)
+    if GUIState.selectedLimbData then
+        WoundSystemDrawLimbActionPoint(GUIState.selectedLimbData.id, GUIState.selectedLimbData.state, limbScreenPoints[GUIState.selectedLimbData.id], 0, 0, scale, dollScale, mx, my, isClicking, GUIState.lastMouseState, minigameActive)
     end
 
     WoundSystemSelectedLimbId = GUIState.selectedLimbData and GUIState.selectedLimbData.id or nil
 
-    -- A click on an empty spot (not on a limb, the action button, the info panel or a minigame) closes the wound view
+    -- A click on an empty spot (not on a limb, the action button or a minigame) closes the wound view
     do
-        local overPanel = mx >= panelX and mx <= panelX + panelW and my >= (20 * scale) and my <= (20 * scale) + panelH
-        local ownsClick = hoveredLimbId or GUIState.actionPointHovered or overPanel
-            or minigameActive or (WoundSystemWorldDrag and WoundSystemWorldDrag.active)
+        local ownsClick = hoveredLimbId or GUIState.actionPointHovered or minigameActive
+            or (WoundSystemWorldDrag and WoundSystemWorldDrag.active)
             or (WoundSystem.HealthGUI.IsExternalMenuOpen and WoundSystem.HealthGUI.IsExternalMenuOpen())
         if isClicking and not GUIState.lastMouseState and not ownsClick and CurTime() - (GUIState.openTime or 0) > 0.3 then
             WoundSystem.CloseHealthHUD()
         end
     end
 
+    GUIState.actionPointHoverPrev = GUIState.actionPointHovered
     GUIState.actionPointHovered = false
     GUIState.lastMouseState = isClicking
     GUIState.lastRightMouseState = isRightClicking

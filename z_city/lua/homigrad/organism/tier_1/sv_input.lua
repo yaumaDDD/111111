@@ -265,9 +265,9 @@ function hg.organism.AddWound(ent, tr, bone, dmgInfo, dmgPos, dmgBlood, inputHol
 	end
 end
 
-function hg.organism.AddWoundManual(ent,dmgBlood,localPos,localAng,bone,time)
-	-- living WoundSystem player: the cut becomes WoundSystem bleeding
-	if hg.WoundBridge and hg.WoundBridge.AddWoundManual(ent, dmgBlood, bone) then return end
+function hg.organism.AddWoundManual(ent,dmgBlood,localPos,localAng,bone,time,glass)
+	-- living WoundSystem player: the cut becomes WoundSystem bleeding (glass = broken glass: shards stay in the wound)
+	if hg.WoundBridge and hg.WoundBridge.AddWoundManual(ent, dmgBlood, bone, glass) then return end
 
 	local org = ent.organism
 	if org.superfighter then return end
@@ -1470,7 +1470,11 @@ local function velocityDamage(ent, data)
 		-- same filters as above (speed, throttling, mass); the hit itself goes through the C:U impact model
 		local massK = (IsValid(data.HitObject) and not data.HitObject:GetEntity():IsWorld()) and math.min(data.HitObject:GetMass() / 20, 1) or 1
 		local dot = math.abs(data.OurOldVelocity:GetNormalized():Dot(data.HitNormal))
-		hg.WoundBridge.ApplyCollision(ply, speed, dot, massK, att, bonename, hitgroup, (surfaceType and bleedSurfaces[surfaceType]) and surfaceType or nil)
+		-- a breakable window counts as glass whatever the surface property says
+		local he = data.HitEntity
+		local glassEnt = IsValid(he) and string.find(he:GetClass(), "break") and he.GetBrushSurfaces and he:GetBrushSurfaces()[1]
+			and string.find(he:GetBrushSurfaces()[1]:GetMaterial():GetName(), "glass")
+		hg.WoundBridge.ApplyCollision(ply, speed, dot, massK, att, bonename, hitgroup, glassEnt and "glass" or ((surfaceType and bleedSurfaces[surfaceType]) and surfaceType or nil))
 		return
 	end
 

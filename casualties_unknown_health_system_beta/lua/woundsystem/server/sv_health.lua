@@ -468,6 +468,8 @@ BodyState = {}
 WoundSystem.Health.PlayerLimbs = PlayerLimbs
 WoundSystem.Health.BodyState = BodyState
 local Sessions = {
+    Shrapnel = {},
+    NextShrapnelId = 1,
     Dislocation = {},
     NextDislocationId = 1,
     Bandage = {},
@@ -1045,6 +1047,7 @@ concommand.Add("cu_god", function(ply, cmd, args)
                 state.bleed = 0
                 state.infection = 0
                 state.infectionSpeed = 0
+                state.shrapnel = 0
                 state.disinfectTime = 0
                 state.broken = false -- Fixed from state.fracture
                 state.dislocated = false
@@ -1198,6 +1201,11 @@ end
 
 
 
+local function GetShrapnelInputDelay()
+    local hz = math.max(WoundSystem.Health.Config.CvFloat(WoundSystem.Health.Config.CVars.ShrapnelInputHz, 20), 1)
+    return 1 / hz
+end
+
 local function GetLimbState(ply, limbId)
     if not PlayerLimbs[ply] then return nil end
     return PlayerLimbs[ply][limbId]
@@ -1290,6 +1298,32 @@ end
 
 WoundSystem.UseMedicalItem = UseRegisteredMedicalItem
 
+local function CountRemainingPieces(session)
+    local count = 0
+    for _, piece in ipairs(session.pieces) do
+        if piece.active and piece.embedded ~= false then
+            count = count + 1
+        end
+    end
+    return count
+end
+
+local function WriteShrapnelPieces(session)
+    for i = 1, WoundSystem.Health.Constants.ShrapnelPieceCount do
+        local piece = session.pieces[i]
+        net.WriteFloat(piece.x)
+        net.WriteFloat(piece.y)
+        net.WriteBool(piece.active)
+    end
+end
+
+local function WriteShrapnelEmbeddedStates(session)
+    for i = 1, WoundSystem.Health.Constants.ShrapnelPieceCount do
+        local piece = session.pieces[i]
+        net.WriteBool(piece and piece.embedded ~= false)
+    end
+end
+
 local MINIGAME_ACK_BANDAGE = 1
 local MINIGAME_ACK_SYRINGE = 2
 local MINIGAME_ACK_AED = 3
@@ -1320,6 +1354,30 @@ local function MinigameTimeoutLimit(ply, baseTimeout)
     return (tonumber(baseTimeout) or 0) + math.Clamp((tonumber(ping) or 0) / 1000 * 4, 0, 1.5)
 end
 
+local function SendShrapnelOpen(ply, session)
+    local remaining = CountRemainingPieces(session)
+    net.Start("WoundSystem_ShrapnelOpen")
+        net.WriteUInt(session.id, 24)
+        net.WriteString(session.limbId)
+        net.WriteBool(session.hasTweezers == true)
+        WriteShrapnelPieces(session)
+        net.WriteUInt(remaining, 4)
+        WriteShrapnelEmbeddedStates(session)
+        net.WriteUInt(session.lastAckSeq or 0, 24)
+    net.Send(ply)
+end
+
+local function SendShrapnelState(ply, session)
+    local remaining = CountRemainingPieces(session)
+    net.Start("WoundSystem_ShrapnelState")
+        net.WriteUInt(session.id, 24)
+        WriteShrapnelPieces(session)
+        net.WriteUInt(remaining, 4)
+        WriteShrapnelEmbeddedStates(session)
+        net.WriteUInt(session.lastAckSeq or 0, 24)
+    net.Send(ply)
+end
+
 local function BroadcastMinigameOneShot(ply, soundName, volume)
     if not IsValid(ply) or not soundName or soundName == "" then return end
 
@@ -1333,6 +1391,32 @@ local function BroadcastMinigameOneShot(ply, soundName, volume)
         net.WriteBool(false)
         net.WriteBool(false)
     net.SendOmit(ply)
+end
+
+local function CloseShrapnelSession(ply, reason)
+    local session = Sessions.Shrapnel[ply]
+    if not session then return end
+
+    if session.playingSquelch then
+        ply:SendLua([[
+            if WoundSystem.SquelchSound then
+                WoundSystem.SquelchSound:Stop()
+            end
+        ]])
+        net.Start("WoundSystem_MinigameSound_Client")
+        net.WriteEntity(ply)
+        net.WriteString("squelchloop.ogg")
+        net.WriteFloat(0.4)
+        net.WriteBool(true)
+        net.WriteBool(true)
+        net.SendOmit(ply)
+    end
+
+    Sessions.Shrapnel[ply] = nil
+    net.Start("WoundSystem_ShrapnelClose")
+        net.WriteUInt(session.id, 24)
+        net.WriteString(reason or "closed")
+    net.Send(ply)
 end
 
 local function DislocationTimerFromBone(session)
@@ -1501,6 +1585,19 @@ local function CloseAedSession(ply, reason)
         net.WriteUInt(session.id, 24)
         net.WriteString(reason or "closed")
     net.Send(ply)
+end
+
+local function BreakShrapnelGrasp(ply, session, state)
+    session.heldIndex = nil
+    session.grabArmed = false
+    session.holdSource = nil
+
+    state.skin = math.Clamp(state.skin - math.Rand(4, 6), 0, 100)
+    state.bleed = math.Clamp(state.bleed + math.Rand(0.4, 1.0), 0, 100)
+    state.pain = math.Clamp(state.pain + math.Rand(9, 16), 0, 100)
+    Fn.ClearLimbBandage(state)
+
+    SendLimbUpdate(ply, session.limbId, true)
 end
 
 function WoundSystem.Health.UnconsciousCardioNetValueChanged(body, previous)
@@ -3608,6 +3705,50 @@ function Fn.GetOgGunshotDamageMultiplier(dmginfo, dmg, limb)
     return math.Clamp(mult, 0.25, maxMult)
 end
 
+-- Z-City: which weapon fired is read from the damage info (inflictor weapon, else the attacker's active weapon, and
+-- the ammo type). Only buckshot-like loads (shotgun pellets) leave shrapnel in a gunshot wound.
+function Fn.IsShotgunHit(dmginfo)
+    if not dmginfo or not dmginfo.GetInflictor then return false end
+
+    local wep
+    local inf = dmginfo:GetInflictor()
+    if IsValid(inf) and inf:IsWeapon() then wep = inf end
+    if not wep then
+        local atk = dmginfo:GetAttacker()
+        if IsValid(atk) and atk.GetActiveWeapon then wep = atk:GetActiveWeapon() end
+    end
+
+    local ammo = ""
+    if dmginfo.GetAmmoType then
+        local id = tonumber(dmginfo:GetAmmoType()) or 0
+        if id > 0 then ammo = string.lower(game.GetAmmoName(id) or "") end
+    end
+    if ammo == "" and IsValid(wep) and istable(wep.Primary) then
+        ammo = string.lower(tostring(wep.Primary.Ammo or ""))
+    end
+
+    if string.find(ammo, "slug", 1, true) or string.find(ammo, "beanbag", 1, true) then return false end
+    if string.find(ammo, "gauge", 1, true) or string.find(ammo, "buckshot", 1, true) then return true end
+
+    return IsValid(wep) and (tonumber(wep.NumBullet) or 1) > 1
+end
+
+-- `dmginfo` = the gunshot that caused it (only shotgun hits embed shrapnel); `always` skips that check (glass, etc.)
+function Fn.AddGunshotShrapnel(state, ply, dmginfo, always)
+    if not state then return end
+    if not always and not Fn.IsShotgunHit(dmginfo) then return end
+
+    if IsValid(ply) and WoundSystem and WoundSystem.HEVGetShrapnelBlockChance then
+        local chance = WoundSystem.HEVGetShrapnelBlockChance(ply)
+        if chance > 0 and math.random() < chance then
+            return
+        end
+    end
+
+    local maxShrapnel = WoundSystem.Health.Constants.ShrapnelPieceCount or 5
+    state.shrapnel = math.min((tonumber(state.shrapnel) or 0) + 1, maxShrapnel)
+end
+
 function Fn.GetGunshotPhysicalResponseTier(dmg)
     dmg = tonumber(dmg) or 0
     if dmg <= 0 then return 0 end
@@ -3687,6 +3828,7 @@ local function ApplyOgGunshotDamage(ply, body, limb, state, dmginfo, dmg)
     state.skin = math.Clamp((state.skin or 100) - (math.Rand(70, 100) * mult), 0, 100)
     state.muscle = math.Clamp((state.muscle or 100) - (math.Rand(70, 100) * mult), 0, 100)
     state.bleed = math.Clamp((state.bleed or 0) + (math.Rand(30, 40) * mult), 0, 100)
+    Fn.AddGunshotShrapnel(state, ply, dmginfo)
     if (state.infectionSpeed or 0) <= 0 then state.infectionSpeed = 0.5 end
     Fn.ClearLimbBandage(state)
 
@@ -3856,6 +3998,7 @@ local defaultLimbState = {
     bleed = 0,
     infection = 0,
     infectionSpeed = 0,
+    shrapnel = 0,
     disinfectTime = 0,
     broken = false,
     dislocated = false,
@@ -4062,6 +4205,7 @@ local function CopyLimbSnapshot(state)
         bleed = state.bleed,
         infection = state.infection,
         infectionSpeed = state.infectionSpeed,
+        shrapnel = state.shrapnel,
         disinfectTime = state.disinfectTime,
         broken = state.broken,
         dislocated = state.dislocated,
@@ -4178,6 +4322,7 @@ SendLimbUpdate = function(ply, limb, force)
         net.WriteFloat(state.bleed)
         net.WriteFloat(state.infection)
         net.WriteFloat(state.infectionSpeed)
+        net.WriteUInt(state.shrapnel, 4)
         net.WriteFloat(state.disinfectTime)
         net.WriteBool(state.broken)
         net.WriteBool(state.dislocated)
@@ -4420,6 +4565,317 @@ local function ResetClientLimbs(ply)
         net.WriteString("RESET_ALL")
     net.Send(ply)
 end
+
+local function BuildShrapnelSession(limbId, shrapnelCount, hasTweezers)
+    local session = {
+        id = Sessions.NextShrapnelId,
+        limbId = limbId,
+        hasTweezers = hasTweezers == true,
+        pieces = {},
+        heldIndex = nil,
+        grabArmed = false,
+        holdSource = nil,
+        holdOffsetX = 0,
+        holdOffsetY = 0,
+        lastInputAt = CurTime() - GetShrapnelInputDelay()
+    }
+
+    Sessions.NextShrapnelId = Sessions.NextShrapnelId + 1
+    if Sessions.NextShrapnelId > 16000000 then
+        Sessions.NextShrapnelId = 1
+    end
+
+    local activePieces = math.Clamp(math.floor(shrapnelCount), 0, WoundSystem.Health.Constants.ShrapnelPieceCount)
+    local hiddenPieces = WoundSystem.Health.Constants.ShrapnelPieceCount - activePieces
+
+    for i = 1, WoundSystem.Health.Constants.ShrapnelPieceCount do
+        local base = WoundSystem.Health.Constants.ShrapnelBasePos[i]
+        local angle = math.Rand(0, math.pi * 2)
+        local radius = math.sqrt(math.Rand(0, 1)) * 20
+        local jitterX = math.cos(angle) * radius
+        local jitterY = math.sin(angle) * radius
+
+        local piece = {
+            x = base.x + jitterX,
+            y = base.y + jitterY,
+            active = true,
+            embedded = true
+        }
+
+        if i <= hiddenPieces then
+            piece.y = piece.y + 8000
+            piece.active = false
+            piece.embedded = false
+        end
+
+        session.pieces[i] = piece
+    end
+
+    return session
+end
+
+local function ShrapnelItemHasTweezers(ply, slotIdx)
+    local slot = ValidateToolSlot(ply, slotIdx)
+    if not slot then return false end
+
+    local itemId = NormalizeToolId(slot.toolName)
+    local item = WoundSystem.Items and WoundSystem.Items.Get and WoundSystem.Items.Get(itemId)
+    local use = item and item.use
+
+    return itemId == "TWEEZERS" or (use and use.minigame == "shrapnel" and use.tweezers ~= false)
+end
+
+-----------------------------------------------------------
+-- SHRAPNEL NETWORKING
+-----------------------------------------------------------
+
+net.Receive("WoundSystem_ShrapnelStart", function(_, ply)
+    if not WoundSystemHealthEnabled() then return end
+    if not IsValid(ply) or not ply:Alive() then return end
+
+    local limbId = net.ReadString()
+    local slotIdx = 0
+    if net.BytesLeft then
+        local bytesLeft, bitsLeft = net.BytesLeft()
+        if (bitsLeft or 0) >= 3 or (bytesLeft or 0) >= 1 then
+            slotIdx = net.ReadUInt(3)
+        end
+    end
+    local existing = Sessions.Shrapnel[ply]
+    if existing then
+        if existing.limbId == limbId then
+            SendShrapnelOpen(ply, existing)
+            return
+        end
+        CloseShrapnelSession(ply, "replaced")
+    end
+
+    local state = GetLimbState(ply, limbId)
+    if not state then return end
+    if state.shrapnel <= 0 then return end
+
+    local hasTweezers = ShrapnelItemHasTweezers(ply, slotIdx)
+    if hasTweezers and not ConsumeToolDurability(ply, slotIdx, 1) then return end
+
+    local session = BuildShrapnelSession(limbId, state.shrapnel, hasTweezers)
+    Sessions.Shrapnel[ply] = session
+    SendShrapnelOpen(ply, session)
+    if hasTweezers then
+        BroadcastMinigameOneShot(ply, "tweezeruse.ogg", 0.5)
+    end
+end)
+
+net.Receive("WoundSystem_ShrapnelClose", function(_, ply)
+    local session = Sessions.Shrapnel[ply]
+    if not session then return end
+
+    local sessionId = net.ReadUInt(24)
+    local reason = net.ReadString()
+    if sessionId ~= session.id then return end
+
+    CloseShrapnelSession(ply, reason ~= "" and reason or "client_close")
+end)
+
+net.Receive("WoundSystem_ShrapnelInput", function(_, ply)
+    if not WoundSystemHealthEnabled() then return end
+
+    local session = Sessions.Shrapnel[ply]
+    if not session then return end
+
+    local sessionId = net.ReadUInt(24)
+    local handX = net.ReadFloat()
+    local handY = net.ReadFloat()
+    local handVelY = net.ReadFloat()
+    
+    local startedClick = net.ReadBool()
+    local holdingClick = net.ReadBool()
+    local stoppedClick = net.ReadBool()
+    local handBaseX = handX
+    local handBaseY = handY
+
+    if net.BytesLeft then
+        local bytesLeft, bitsLeft = net.BytesLeft()
+        -- BytesLeft includes a small engine trailer; require a full two-float payload.
+        if (bitsLeft or 0) >= 64 or (bytesLeft or 0) >= 8 then
+            handBaseX = net.ReadFloat()
+            handBaseY = net.ReadFloat()
+        end
+    end
+    local inputSeq = ReadOptionalInputSeq()
+
+    if sessionId ~= session.id then return end
+    if not IsValid(ply) or not ply:Alive() then
+        CloseShrapnelSession(ply, "dead")
+        return
+    end
+
+    local now = CurTime()
+    local clickEdge = startedClick or stoppedClick
+    if now - (session.lastInputAt or 0) < GetShrapnelInputDelay() and not clickEdge then return end
+    session.lastInputAt = now
+    session.lastAckSeq = inputSeq
+
+    local state = GetLimbState(ply, session.limbId)
+    if not state then
+        CloseShrapnelSession(ply, "invalid_limb")
+        return
+    end
+
+    local clickStartedInPullArea = startedClick
+        and (handY > WoundSystem.Health.Constants.ShrapnelHandStartY or handBaseY > WoundSystem.Health.Constants.ShrapnelHandStartY)
+
+    if clickStartedInPullArea then
+        session.grabArmed = true
+    elseif not holdingClick then
+        session.grabArmed = false
+    end
+
+    -- Shrapnel interaction. The addon hand can lag behind the cursor, so allow
+    -- a held click to latch once the grip/base actually reaches a shard.
+    if not session.heldIndex and holdingClick and session.grabArmed then
+        local closestDist = math.huge
+        local closestIdx = nil
+        local closestSource = nil
+        local closestHandX = handX
+        local closestHandY = handY
+        local candidates = {
+            {x = handX, y = handY, source = "grip"},
+            {x = handBaseX, y = handBaseY, source = "base"}
+        }
+
+        for idx, piece in ipairs(session.pieces) do
+            if piece.active then
+                for _, candidate in ipairs(candidates) do
+                    local dx = math.abs(candidate.x - piece.x)
+                    local dy = math.abs(candidate.y - piece.y)
+
+                    if dx <= WoundSystem.Health.Constants.ShrapnelGrabHalfX and dy <= WoundSystem.Health.Constants.ShrapnelGrabHalfY then
+                        local dist = (dx * dx) + (dy * dy)
+                        if dist < closestDist then
+                            closestDist = dist
+                            closestIdx = idx
+                            closestSource = candidate.source
+                            closestHandX = candidate.x
+                            closestHandY = candidate.y
+                        end
+                    end
+                end
+            end
+        end
+
+        if closestIdx then
+            session.heldIndex = closestIdx
+            session.holdSource = closestSource
+            session.holdOffsetX = session.pieces[closestIdx].x - closestHandX
+            session.holdOffsetY = session.pieces[closestIdx].y - closestHandY
+        end
+    end
+
+    local shouldReleaseHeldShrapnel = stoppedClick or (not holdingClick and not startedClick)
+
+    -- Shrapnel drag physics
+    local heldIndex = session.heldIndex
+    if heldIndex and session.pieces[heldIndex] and session.pieces[heldIndex].active then
+        local heldPiece = session.pieces[heldIndex]
+        local dragHandX = session.holdSource == "base" and handBaseX or handX
+        local dragHandY = session.holdSource == "base" and handBaseY or handY
+
+        local targetX = dragHandX + session.holdOffsetX
+        local targetY = dragHandY + session.holdOffsetY
+        local smoothFactor = WoundSystem.Health.Constants.ShrapnelDragSmooth
+
+        if heldPiece.embedded == false then
+            heldPiece.x = Lerp(smoothFactor, heldPiece.x, targetX)
+            heldPiece.y = Lerp(smoothFactor, heldPiece.y, targetY)
+            heldPiece.y = math.Clamp(heldPiece.y, WoundSystem.Health.Constants.ShrapnelMinY, WoundSystem.Health.Constants.ShrapnelFreeMaxY)
+
+            if heldPiece.y <= WoundSystem.Health.Constants.ShrapnelReimpaleY then
+                heldPiece.embedded = true
+            end
+        else
+            heldPiece.y = Lerp(smoothFactor, heldPiece.y, targetY)
+            heldPiece.y = math.Clamp(heldPiece.y, WoundSystem.Health.Constants.ShrapnelMinY, WoundSystem.Health.Constants.ShrapnelExtractY)
+
+            if heldPiece.y >= WoundSystem.Health.Constants.ShrapnelExtractY then
+                heldPiece.y = WoundSystem.Health.Constants.ShrapnelExtractY
+                heldPiece.embedded = false
+            end
+
+            if heldPiece.embedded ~= false and not session.hasTweezers then
+                if math.abs(handVelY) > WoundSystem.Health.Constants.ShrapnelBreakVelY then
+                    BreakShrapnelGrasp(ply, session, state)
+                    SendShrapnelState(ply, session)
+                    return
+                end
+
+                if math.abs(heldPiece.x - targetX) > WoundSystem.Health.Constants.ShrapnelBreakXDist then
+                    BreakShrapnelGrasp(ply, session, state)
+                    SendShrapnelState(ply, session)
+                    return
+                end
+            end
+        end
+    end
+
+    if shouldReleaseHeldShrapnel then
+        session.heldIndex = nil
+        session.grabArmed = false
+        session.holdSource = nil
+    end
+
+    local heldPieceForSound = session.heldIndex and session.pieces[session.heldIndex] or nil
+    local shouldPlaySquelch = heldPieceForSound
+        and heldPieceForSound.active
+        and heldPieceForSound.embedded ~= false
+
+    if shouldPlaySquelch then
+        if not session.playingSquelch then
+            session.playingSquelch = true
+            ply:SendLua([[
+                if not WoundSystem.SquelchSound then
+                    WoundSystem.SquelchSound = CreateSound(LocalPlayer(), "squelchloop.ogg")
+                end
+                WoundSystem.SquelchSound:Play()
+                WoundSystem.SquelchSound:ChangeVolume(0.8, 0)
+            ]])
+            net.Start("WoundSystem_MinigameSound_Client")
+            net.WriteEntity(ply)
+            net.WriteString("squelchloop.ogg")
+            net.WriteFloat(0.4)
+            net.WriteBool(true)
+            net.WriteBool(false)
+            net.SendOmit(ply)
+        end
+    else
+        if session.playingSquelch then
+            session.playingSquelch = false
+            ply:SendLua([[
+                if WoundSystem.SquelchSound then
+                    WoundSystem.SquelchSound:Stop()
+                end
+            ]])
+            net.Start("WoundSystem_MinigameSound_Client")
+            net.WriteEntity(ply)
+            net.WriteString("squelchloop.ogg")
+            net.WriteFloat(0.4)
+            net.WriteBool(true)
+            net.WriteBool(true)
+            net.SendOmit(ply)
+        end
+    end
+
+    local remaining = CountRemainingPieces(session)
+    state.shrapnel = remaining
+    SendLimbUpdate(ply, session.limbId, true)
+
+    if remaining <= 0 and not holdingClick then
+        SendShrapnelState(ply, session)
+        CloseShrapnelSession(ply, "complete")
+        return
+    end
+
+    SendShrapnelState(ply, session)
+end)
 
 local function BuildDislocationSession(limbId, dislocationTimer, hasWrench)
     local finishX = WoundSystem.Health.Constants.DislocationFinishX
@@ -4976,6 +5432,7 @@ net.Receive("WoundSystem_SyringeInput", function(_, ply)
 
     if brokeNeedle then
         session.lastAckSeq = inputSeq
+        state.shrapnel = math.max(tonumber(state.shrapnel) or 0, 1)
         state.pain = math.Clamp((state.pain or 0) + 20, 0, 100)
         SendLimbUpdate(ply, session.limbId, true)
         ply:EmitSound("bullethit.ogg", 70, 100, 0.8)
@@ -5609,6 +6066,7 @@ hook.Add("PlayerSpawn", "WoundSystem_SpawnSync", function(ply)
             RestorePlayerOnRespawn(ply)
         end
         ResetPlayerRagdollCamera(ply)
+        CloseShrapnelSession(ply, "respawn")
         CloseDislocationSession(ply, "respawn")
         CloseBandageSession(ply, "respawn")
         CloseSyringeSession(ply, "respawn")
@@ -5617,6 +6075,7 @@ hook.Add("PlayerSpawn", "WoundSystem_SpawnSync", function(ply)
         ResetPlayerInventory(ply)
     else
         ResetPlayerRagdollCamera(ply)
+        CloseShrapnelSession(ply, "respawn")
         CloseDislocationSession(ply, "respawn")
         CloseBandageSession(ply, "respawn")
         CloseSyringeSession(ply, "respawn")
@@ -5958,6 +6417,7 @@ WoundSystem.Health.HandleDamage = function(ent, dmginfo)
                 end
             else
             local isHighCaliber = dmg > 30
+            Fn.AddGunshotShrapnel(state, ply, dmginfo)
 
             if isHighCaliber then
                 -- Overpenetration: massive tissue destruction, clean through
@@ -6052,13 +6512,20 @@ WoundSystem.Health.HandleDamage = function(ent, dmginfo)
 
         elseif dmginfo:IsDamageType(DMG_BLAST) then
             -- ==========================================
-            -- EXPLOSION: shockwave fractures
+            -- EXPLOSION: Shrapnel shower + shockwave fractures
             -- ==========================================
             state.muscle = math.Clamp(state.muscle - dmg * 0.8, 0, 100)
             state.skin   = math.Clamp(state.skin   - dmg * 0.45, 0, 100)
             state.pain   = math.Clamp(state.pain   + dmg * 0.9, 0, 100)
 
             if not Fn.IsCriticalLimb(limb) then
+                -- Shrapnel shower: multiple fragments per blast
+                local fragCount = 0
+                if rawDmg >= 20 then fragCount = fragCount + (math.random() < 0.6 and 1 or 0) end
+                if rawDmg >= 40 then fragCount = fragCount + (math.random() < 0.5 and 1 or 0) end
+                if rawDmg >= 70 then fragCount = fragCount + (math.random() < 0.4 and 1 or 0) end
+                state.shrapnel = math.min(state.shrapnel + fragCount, 5)
+
                 -- Shockwave fractures
                 local fracChance = math.Clamp((rawDmg - 25) / 75, 0, 0.85)
                 if math.random() < fracChance then
@@ -6323,17 +6790,21 @@ local function LimbPhysiologyTick(dt)
             local painTarget = 15 - (state.skin or 100) * 0.15 + (state.infection or 0) * 0.1
             local painApproachRate = ((state.pain or 0) > painTarget) and 1 or 0.6
             state.pain = math.Clamp(math.Approach(state.pain or 0, painTarget, painApproachRate * dt), 0, 100)
+            if (state.shrapnel or 0) > 0 then
+                state.pain = math.Clamp(state.pain + (1 * dt), 0, 100)
+            end
             if body.temperature < 32 then
                 state.pain = math.max(0, state.pain - (5 * dt))
             end
 
             -- Bleed clotting + bandage slow (C# Limb.Update)
+            local shrapnelClotMult = (state.shrapnel or 0) > 0 and 0 or 1
             local bandageClotTerm = 0
             if (state.bandageSlowAmount or 0) > 0 then
                 bandageClotTerm = 1.25 * dt
             end
 
-            local bleedReduction = dt * body.bleedClottingSpeed * healingMult + bandageClotTerm
+            local bleedReduction = dt * body.bleedClottingSpeed * shrapnelClotMult * healingMult + bandageClotTerm
             state.bleed = math.Clamp((state.bleed or 0) - bleedReduction, 0, 100 - (state.skin or 100))
 
             state.bandageSlowAmount = math.max(0, (state.bandageSlowAmount or 0) - (1.25 * dt))
@@ -6354,7 +6825,7 @@ local function LimbPhysiologyTick(dt)
             end
 
             -- Skin heal (C# SkinHealRate)
-            local canSkinHeal = not Fn.LimbIsInfected(state) and (body.hunger or 100) > 0
+            local canSkinHeal = (state.shrapnel or 0) == 0 and not Fn.LimbIsInfected(state) and (body.hunger or 100) > 0
             if canSkinHeal then
                 local skinRate = 0.055 * sleepingMult
                     * (((state.skin or 100) > 10) and 1 or 0.25)
@@ -6441,7 +6912,8 @@ local function LimbPhysiologyTick(dt)
 end
 
 function WoundSystem.Health.PlayerHasActiveMedicalSession(ply)
-    return Sessions.Dislocation[ply] ~= nil
+    return Sessions.Shrapnel[ply] ~= nil
+        or Sessions.Dislocation[ply] ~= nil
         or Sessions.Syringe[ply] ~= nil
         or Sessions.Bandage[ply] ~= nil
         or Sessions.Aed[ply] ~= nil
@@ -7492,7 +7964,8 @@ end
 RebuildWoundTimers()
 
 local function HasActiveMedicalSessions()
-    return next(Sessions.Dislocation) ~= nil
+    return next(Sessions.Shrapnel) ~= nil
+        or next(Sessions.Dislocation) ~= nil
         or next(Sessions.Syringe) ~= nil
         or next(Sessions.Bandage) ~= nil
         or next(Sessions.Aed) ~= nil
@@ -7502,14 +7975,16 @@ function WoundSystem.Health.CancelActiveMedicalSessions(ply, reason)
     if not IsValid(ply) then return end
 
     reason = reason or "interrupted"
+    CloseShrapnelSession(ply, reason)
     CloseDislocationSession(ply, reason)
     CloseSyringeSession(ply, reason)
     CloseBandageSession(ply, reason)
     CloseAedSession(ply, reason)
 end
 
-local function MedicalSessionSafetyTick()
+local function ShrapnelSessionSafetyTick()
     if not WoundSystemHealthEnabled() then
+        for ply in pairs(Sessions.Shrapnel) do CloseShrapnelSession(ply, "disabled") end
         for ply in pairs(Sessions.Dislocation) do CloseDislocationSession(ply, "disabled") end
         for ply in pairs(Sessions.Syringe) do CloseSyringeSession(ply, "disabled") end
         for ply in pairs(Sessions.Bandage) do CloseBandageSession(ply, "disabled") end
@@ -7520,6 +7995,29 @@ local function MedicalSessionSafetyTick()
     if not HasActiveMedicalSessions() then return end
 
     local now = CurTime()
+    for ply, session in pairs(Sessions.Shrapnel) do
+        if not IsValid(ply) then
+            Sessions.Shrapnel[ply] = nil
+            continue
+        end
+
+        if not ply:Alive() then
+            CloseShrapnelSession(ply, "dead")
+            continue
+        end
+
+        local state = GetLimbState(ply, session.limbId)
+        if not state then
+            CloseShrapnelSession(ply, "invalid_limb")
+            continue
+        end
+
+        if now - (session.lastInputAt or now) > MinigameTimeoutLimit(ply, WoundSystem.Health.Constants.ShrapnelInputTimeout) then
+            CloseShrapnelSession(ply, "timeout")
+            continue
+        end
+    end
+
     for ply, session in pairs(Sessions.Dislocation) do
         if not IsValid(ply) then
             Sessions.Dislocation[ply] = nil
@@ -7613,13 +8111,14 @@ local function MedicalSessionSafetyTick()
     end
 end
 
-if timer.Exists(WoundSystem.Health.Constants.MedicalSessionTimerName) then
-    timer.Adjust(WoundSystem.Health.Constants.MedicalSessionTimerName, 0.1, 0, MedicalSessionSafetyTick)
+if timer.Exists(WoundSystem.Health.Constants.ShrapnelTimerName) then
+    timer.Adjust(WoundSystem.Health.Constants.ShrapnelTimerName, 0.1, 0, ShrapnelSessionSafetyTick)
 else
-    timer.Create(WoundSystem.Health.Constants.MedicalSessionTimerName, 0.1, 0, MedicalSessionSafetyTick)
+    timer.Create(WoundSystem.Health.Constants.ShrapnelTimerName, 0.1, 0, ShrapnelSessionSafetyTick)
 end
 
 function WoundSystemCloseAllMedicalSessions(ply, reason)
+    CloseShrapnelSession(ply, reason)
     CloseDislocationSession(ply, reason)
     CloseBandageSession(ply, reason)
     CloseSyringeSession(ply, reason)
@@ -7689,6 +8188,7 @@ hook.Add("PlayerDisconnected", "WoundSystem_Cleanup", function(ply)
     if BodyState[ply] then
         RestorePlayerFromUnconsciousRagdoll(ply, BodyState[ply], false)
     end
+    Sessions.Shrapnel[ply] = nil
     Sessions.Dislocation[ply] = nil
     Sessions.Bandage[ply] = nil
     Sessions.Syringe[ply] = nil
@@ -7700,9 +8200,10 @@ hook.Add("PlayerDisconnected", "WoundSystem_Cleanup", function(ply)
     ply.WoundSystemGodMode = nil
 end)
 
-hook.Add("PlayerDeath", "WoundSystem_MedicalSessionsEndOnDeath", function(victim)
+hook.Add("PlayerDeath", "WoundSystem_ShrapnelEndOnDeath", function(victim)
     if not WoundSystemHealthEnabled() then return end
 
+    CloseShrapnelSession(victim, "dead")
     CloseDislocationSession(victim, "dead")
     CloseBandageSession(victim, "dead")
     CloseSyringeSession(victim, "dead")
@@ -7945,14 +8446,26 @@ WoundSystem.Health.RestorePlayerFromUnconsciousRagdoll = RestorePlayerFromUncons
 WoundSystem.Health.Fn = Fn
 WoundSystem.Health.Const = Const
 WoundSystem.Health.RagdollBoneNameToLimb = RagdollBoneNameToLimb
--- Z-City bridge: collisions / falls feed the C:U impact model
+-- Z-City bridge: collisions / falls feed the C:U impact model, glass embeds C:U shrapnel (pulled out with the shrapnel minigame)
 WoundSystem.Health.ProcessImpactDamage = ProcessImpactDamage
+WoundSystem.Health.AddLimbShrapnel = function(ply, limbId, count)
+    local state = PlayerLimbs[ply] and PlayerLimbs[ply][limbId]
+    if not state or state.dismembered then return false end
+
+    for _ = 1, math.max(1, math.floor(tonumber(count) or 1)) do
+        Fn.AddGunshotShrapnel(state, ply, nil, true)
+    end
+
+    SendLimbUpdate(ply, limbId, true)
+    return true
+end
 WoundSystem.Health.SendCardioUpdate = function(ply, ...) if SendCardioUpdate then return SendCardioUpdate(ply, ...) end end
 
 -- Brand new body and limbs, like after a respawn (used by the Z-City "Reset organism" tool). Inventory is kept.
 function WoundSystem.Health.ResetPlayer(ply)
     if not WoundSystemHealthEnabled() or not IsValid(ply) or not ply:IsPlayer() then return false end
 
+    CloseShrapnelSession(ply, "respawn")
     CloseDislocationSession(ply, "respawn")
     CloseBandageSession(ply, "respawn")
     CloseSyringeSession(ply, "respawn")
@@ -7997,7 +8510,7 @@ function WoundSystem.Health.ApplyItemToBody(target, itemId, limbId, amount, opts
     if WoundSystem.Items.LimbAllowed and not WoundSystem.Items.LimbAllowed(use, limbId) then return false end
 
     local minigame = use.minigame
-    if minigame == "aed" or minigame == "dislocation" then
+    if minigame == "aed" or minigame == "dislocation" or minigame == "shrapnel" then
         return false -- these need the interactive WoundSystem minigame
     end
 
@@ -8477,6 +8990,7 @@ net.Receive("WoundSystem_AdminDebugAction", function(len, ply)
                 state.bleed          = 0
                 state.infection      = 0
                 state.infectionSpeed = 0
+                state.shrapnel       = 0
                 state.broken         = false
                 state.dislocated     = false
                 state.isBandaged     = false
@@ -8484,6 +8998,22 @@ net.Receive("WoundSystem_AdminDebugAction", function(len, ply)
                 state.hasInjection   = false
                 SendLimbUpdate(ply, param1, true)
             end
+        end
+
+    elseif action == "add_shrapnel" then
+        -- param1 = limbName, param2 = amount (default 1)
+        local limbs = PlayerLimbs[ply]
+        if limbs and limbs[param1] then
+            limbs[param1].shrapnel = math.Clamp((limbs[param1].shrapnel or 0) + math.max(1, param2), 0, 20)
+            SendLimbUpdate(ply, param1, true)
+        end
+
+    elseif action == "remove_shrapnel" then
+        -- param1 = limbName
+        local limbs = PlayerLimbs[ply]
+        if limbs and limbs[param1] then
+            limbs[param1].shrapnel = 0
+            SendLimbUpdate(ply, param1, true)
         end
 
     elseif action == "set_fracture" then
@@ -8641,6 +9171,7 @@ net.Receive("WoundSystem_AdminDebugAction", function(len, ply)
                 state.bleed          = 0
                 state.infection      = 0
                 state.infectionSpeed = 0
+                state.shrapnel       = 0
                 state.broken         = false
                 state.dislocated     = false
                 state.dismembered    = false
