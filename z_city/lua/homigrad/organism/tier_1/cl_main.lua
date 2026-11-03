@@ -793,6 +793,9 @@ hook.Add("Player-Ragdoll think", "organism-think-client-blood", function(ply, en
 						if not wound[2] or not wound[3] or not bonePos or not boneAng then return end
 						local pos, ang = LocalToWorld(wound[2], wound[3], bonePos, boneAng)
 
+						-- own wound next to the first-person camera (head / neck): its blood sprites would flicker in front of the face
+						if ply == lply and pos:DistToSqr(EyePos()) < 14 * 14 then wound[5] = time + 0.1 continue end
+
 						local water = bit.band(util.PointContents(pos), CONTENTS_WATER) == CONTENTS_WATER
 						if water then
 							if wound[5] + 1 < time then
@@ -839,6 +842,8 @@ hook.Add("Player-Ragdoll think", "organism-think-client-blood", function(ply, en
 						local bonePos, boneAng = mat:GetTranslation(), mat:GetAngles()
 						if not wound[2] or not wound[3] or not bonePos or not boneAng then return end
 						local pos = LocalToWorld(wound[2], wound[3], bonePos, boneAng)
+
+						if ply == lply and pos:DistToSqr(EyePos()) < 14 * 14 then wound[5] = time + 0.1 continue end -- (see above)
 
 						local dir = wound[6]
 						local len = dir:Length() * (org.pulse or 70) / 70
