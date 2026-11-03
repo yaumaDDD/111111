@@ -131,6 +131,14 @@ end
 hg.DeathCam = false
 
 function hg.organism.GasDamage(org, dmg, dmgInfo)
+	-- a bridged player: the gas damages his lungs in WoundSystem (WB.SyncToxins: slow suffocation), same scale as the Z-City lungs
+	local WBr = hg.WoundBridge
+	local gasPly = WBr and IsValid(org.owner) and WBr.GetPlayer(org.owner)
+	if gasPly and WBr.IsBridged(gasPly) then
+		org.wbLungs = math.min((org.wbLungs or 0) + dmg / 40, 1)
+		return
+	end
+
 	hg.organism.input_list.lungsR(org, 1, dmg / 10, dmgInfo)
 	hg.organism.input_list.lungsL(org, 1, dmg / 10, dmgInfo)
 	hg.organism.input_list.trachea(org, 1, dmg / 10, dmgInfo)

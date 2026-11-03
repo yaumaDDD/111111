@@ -7510,6 +7510,9 @@ local function CardioLiteTick(dt)
             targetResp = 0
         end
         
+        -- external respiration load (Z-City bridge: damaged lungs, poison, gas, held breath)
+        targetResp = targetResp - (body.zcRespPenalty or 0)
+
         local thoraxState = limbs["thorax"]
         local abdomenState = limbs["abdomen"]
         if (thoraxState and thoraxState.muscle <= 5) or (abdomenState and abdomenState.muscle <= 5) then
@@ -7522,10 +7525,16 @@ local function CardioLiteTick(dt)
         local bloodVolPct = 0.5 + (body.bloodVolume / 200)
         
         local isSubmerged = waterLevelEnt:WaterLevel() >= 3
-        local isBreathing = (body.respiratoryRate > 10) and (not isSubmerged or body.hasScubaGear)
+        local isBreathing = (body.respiratoryRate > 10) and (not isSubmerged or body.hasScubaGear) and not body.zcHoldBreath
         local breathingMultiplier = isBreathing and 1 or 0
 
         body.bloodOxygen = body.bloodOxygen + ((body.respiratoryRate * 0.01 * breathingMultiplier) - 0.5) * dt
+        if (body.zcOxygenDrain or 0) > 0 then
+            body.bloodOxygen = body.bloodOxygen - body.zcOxygenDrain * dt
+        end
+        if body.zcOxygenCap and body.bloodOxygen > body.zcOxygenCap then
+            body.bloodOxygen = math.Approach(body.bloodOxygen, body.zcOxygenCap, 0.75 * dt)
+        end
         -- Low stamina drains blood oxygen heavily (C# Ref: - (100-stamina)/100 * 0.35 * dt)
         body.bloodOxygen = body.bloodOxygen - (((100 - body.stamina) / 100) * 0.35 * dt)
 

@@ -136,6 +136,9 @@ function WB.ApplyDamage(ply, dmgInfo, bonename, hitgroup, rawDamage, onRagdoll)
 	local damage = (rawDamage or dmgInfo:GetDamage()) * WB.cvDamageScale:GetFloat()
 	if damage <= 0 then return true end
 
+	-- nerve gas: Z-City gives it no wound, only the lung damage (hg.organism.GasDamage -> WB.SyncToxins)
+	if dmgInfo:IsDamageType(DMG_NERVEGAS) and not dmgInfo:IsDamageType(DMG_BULLET + DMG_BLAST + DMG_SLASH + DMG_CLUB + DMG_BUCKSHOT) then return true end
+
 	local clone = CloneDamageInfo(dmgInfo, damage)
 
 	-- explosions hit the whole body: let WoundSystem pick / spread, otherwise pin the exact limb that was hit
@@ -666,6 +669,99 @@ function WB.SyncBandages(ply, limbs)
 	end
 end
 
+-----------------------------------------------------------------------------------------------------------------------
+-- POISON / GAS  (Z-City structure, the oxygen itself is the WoundSystem blood oxygen)
+--   gas          hg.organism.GasDamage -> org.wbLungs (lung damage). Damaged lungs lower the breathing efficiency (Z-City:
+--                OxygenateBlood), 100% = no oxygen intake at all -> blood oxygen falls -> brain damage -> death
+--   poison1/2/3  tetrodotoxin / contact poison / cyanide gas: 30 s after the dose the oxygen regeneration stops (org.o2.regen = 0)
+--   Poison_KCN   cyanide capsule: after 22/potency s stamina and oxygen are capped, after 90/potency s regeneration stops
+--   held breath  (Z-City key) no intake while held, released at low oxygen like the Z-City lungs module
+-----------------------------------------------------------------------------------------------------------------------
+local POISON_DELAY = 30        -- s from the dose until the oxygen regeneration stops (poison1/2/3)
+local POISON_O2_DRAIN = 1.0    -- extra blood oxygen loss (%/s) while the regeneration is stopped
+local HOLD_O2_DRAIN = 0.7      -- extra blood oxygen loss (%/s) while the breath is held
+local HOLD_RELEASE_O2 = 70     -- the breath is released below this blood oxygen
+local LUNG_HEAL_TIME = 1800    -- s for lungs to recover fully (Z-City: 30 minutes)
+
+local function SendHoldBreath(org)
+	net.Start("organism_send")
+	net.WriteTable({holdingbreath = org.holdingbreath, owner = org.owner})
+	net.WriteBool(true)
+	net.WriteBool(false)
+	net.WriteBool(false)
+	net.WriteBool(true)
+	net.Send(org.owner)
+end
+
+function WB.SyncToxins(owner, org, body, dt)
+	local now = CurTime()
+
+	-- lungs (gas)
+	local lungs = math.Clamp(org.wbLungs or 0, 0, 1)
+	if lungs > 0 and (body.brainHealth or 100) > 60 then
+		lungs = math.max(lungs - dt / ((org.thiamine or 0) > 0 and LUNG_HEAL_TIME / 3.75 or LUNG_HEAL_TIME), 0)
+	end
+	org.wbLungs = lungs > 0 and lungs or nil
+	if org.lungsL and org.lungsR then
+		-- legacy organ hits do not count: the lungs of the shadow are the gas damage only
+		org.lungsL[1], org.lungsR[1] = lungs, lungs
+	end
+
+	local intake = math.Clamp((1 - lungs) * (1 - (org.trachea or 0)), 0, 1)
+
+	-- poisons: the regeneration of the oxygen stops
+	local noRegen = false
+	for _, key in ipairs({"poison1", "poison2", "poison3"}) do
+		local t = org[key]
+		if t and now - t > POISON_DELAY then noRegen = true end
+	end
+
+	local o2Cap, staminaCap
+	local kcn = org.Poison_KCN
+	if kcn and kcn.StartTime then
+		local potency = math.max(kcn.Potency or 1, 0.1)
+		local el = now - kcn.StartTime
+		if el > 22 / potency then
+			staminaCap = 50 / potency
+			o2Cap = 100 / potency
+		end
+		if el > 90 / potency then noRegen = true end
+	end
+
+	-- extinguisher powder in the face: no intake for a moment
+	local sprayed = org.is_sprayed_at
+	org.is_sprayed_at = nil
+
+	local holding = org.holdingbreath and true or false
+	if holding and (body.bloodOxygen or 100) < HOLD_RELEASE_O2 then
+		holding = false
+		org.holdingbreath = false
+		owner.releasebreathe = nil
+		owner:EmitSound(ThatPlyIsFemale and ThatPlyIsFemale(owner) and ("breathing/exhale/female/exhale_0" .. math.random(5) .. ".wav")
+			or ("breathing/exhale/male/exhale_0" .. math.random(5) .. ".wav"), 65)
+		SendHoldBreath(org)
+	end
+
+	local penalty = 100 * (1 - intake)
+	if noRegen or sprayed then penalty = 100 end
+
+	body.zcRespPenalty = penalty > 0 and penalty or nil
+	body.zcOxygenDrain = (noRegen and POISON_O2_DRAIN or 0) + (holding and HOLD_O2_DRAIN or 0)
+	body.zcHoldBreath = holding or nil
+	body.zcOxygenCap = o2Cap
+
+	if staminaCap then body.stamina = math.min(body.stamina or 100, staminaCap) end
+
+	-- the Z-City side (breathing sounds, moodles, screen) reads the shadow oxygen
+	if org.o2 then
+		org.o2[1] = math.Clamp((body.bloodOxygen or 100) / 100, 0, 1) * (org.o2.range or 30)
+	end
+end
+
+hook.Add("Org Clear", "ZCity_WoundBridge_Toxins", function(org)
+	org.wbLungs = nil
+end)
+
 function WB.Think(owner, org, dt)
 	if not IsValid(owner) or not owner:IsPlayer() or not owner:Alive() then return end
 
@@ -675,6 +771,7 @@ function WB.Think(owner, org, dt)
 
 	WB.SyncWounds(owner, org, WB.GetLimbs(owner))
 	WB.SyncBandages(owner, WB.GetLimbs(owner))
+	WB.SyncToxins(owner, org, body, dt)
 
 	org.timeValue = dt
 
