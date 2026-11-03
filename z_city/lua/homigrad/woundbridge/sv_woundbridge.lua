@@ -30,7 +30,7 @@ WB.cvMinigame = WB.cvMinigame or (ConVarExists("zc_woundsystem_minigames") and G
 
 WB.cvEyeChance = WB.cvEyeChance or (ConVarExists("zc_wound_eye_chance") and GetConVar("zc_wound_eye_chance")
 	or CreateConVar("zc_wound_eye_chance", "0.04", FCVAR_ARCHIVE,
-		"Chance (0..1) that a firearm bullet or a bladed melee weapon hitting the head destroys an eye (2 eyes -> 1 -> blind); 0 = off", 0, 1))
+		"Chance (0..1) that a weapon hit (any firearm, blade, blunt, fists) on the head destroys an eye (2 eyes -> 1 -> blind); 0 = off", 0, 1))
 
 WB.cvDebug = WB.cvDebug or (ConVarExists("zc_woundsystem_bridge_debug") and GetConVar("zc_woundsystem_bridge_debug")
 	or CreateConVar("zc_woundsystem_bridge_debug", "0", FCVAR_ARCHIVE, "Print bridge debug output", 0, 1))
@@ -124,9 +124,11 @@ local function CloneDamageInfo(src, damage)
 	return dmg
 end
 
---- Head hit by a bullet / blade: small chance (zc_wound_eye_chance) to lose an eye. The WoundSystem head.eyes value
+--- Head hit by any weapon: small chance (zc_wound_eye_chance) to lose an eye. The WoundSystem head.eyes value
 --- (2 = both eyes, 1 = one eye gone, 0 = blind) drives its blind screen / moodle / facial expression.
 --- A shotgun shot is several pellet hits at once, so there is a short per-player cooldown between rolls.
+WB.EyeImmuneDamage = DMG_FALL + DMG_CRUSH + DMG_NERVEGAS + DMG_POISON + DMG_BURN + DMG_SLOWBURN + DMG_DROWN + DMG_RADIATION + DMG_ACID + DMG_SHOCK + DMG_PARALYZE + DMG_DISSOLVE
+
 function WB.EyeHit(ply, limbId, chance)
 	if limbId ~= "head" then return false end
 	if (ply._WBNextEyeRoll or 0) > CurTime() then return false end
@@ -193,8 +195,9 @@ function WB.ApplyDamage(ply, dmgInfo, bonename, hitgroup, rawDamage, onRagdoll)
 
 	dbg("damage", ply, limb, damage)
 
-	-- a bullet (any firearm) or a bladed Z-City melee weapon hitting the head: small chance to destroy an eye
-	if ply:Alive() and not dmgInfo:IsDamageType(DMG_BLAST) and dmgInfo:IsDamageType(DMG_BULLET + DMG_BUCKSHOT + DMG_SLASH) then
+	-- any weapon hit on the head (firearm, blade, blunt, fists, shrapnel ...): small chance to destroy an eye.
+	-- Not weapons: falls, prop crush, gas / poison, fire, drowning, radiation, acid, shock.
+	if ply:Alive() and not dmgInfo:IsDamageType(WB.EyeImmuneDamage) then
 		WB.EyeHit(ply, limb or (hitgroup and WB.HitgroupToWS[hitgroup]))
 	end
 
