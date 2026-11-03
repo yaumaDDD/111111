@@ -28,6 +28,10 @@ WB.cvMinigame = WB.cvMinigame or (ConVarExists("zc_woundsystem_minigames") and G
 	or CreateConVar("zc_woundsystem_minigames", "1", FCVAR_ARCHIVE,
 		"1 = Z-City medical SWEPs open the WoundSystem minigame (bandage / syringe), the effect is applied only after it was completed", 0, 1))
 
+WB.cvEyeChance = WB.cvEyeChance or (ConVarExists("zc_wound_eye_chance") and GetConVar("zc_wound_eye_chance")
+	or CreateConVar("zc_wound_eye_chance", "0.04", FCVAR_ARCHIVE,
+		"Chance (0..1) that a firearm bullet or a bladed melee weapon hitting the head destroys an eye (2 eyes -> 1 -> blind); 0 = off", 0, 1))
+
 WB.cvDebug = WB.cvDebug or (ConVarExists("zc_woundsystem_bridge_debug") and GetConVar("zc_woundsystem_bridge_debug")
 	or CreateConVar("zc_woundsystem_bridge_debug", "0", FCVAR_ARCHIVE, "Print bridge debug output", 0, 1))
 
@@ -120,6 +124,31 @@ local function CloneDamageInfo(src, damage)
 	return dmg
 end
 
+--- Head hit by a bullet / blade: small chance (zc_wound_eye_chance) to lose an eye. The WoundSystem head.eyes value
+--- (2 = both eyes, 1 = one eye gone, 0 = blind) drives its blind screen / moodle / facial expression.
+--- A shotgun shot is several pellet hits at once, so there is a short per-player cooldown between rolls.
+function WB.EyeHit(ply, limbId, chance)
+	if limbId ~= "head" then return false end
+	if (ply._WBNextEyeRoll or 0) > CurTime() then return false end
+	ply._WBNextEyeRoll = CurTime() + 0.25
+
+	if math.Rand(0, 1) >= (chance or WB.cvEyeChance:GetFloat()) then return false end
+
+	local limbs = WB.GetLimbs(ply)
+	local head = limbs and limbs.head
+	if not head or head.dismembered then return false end
+
+	local eyes = tonumber(head.eyes) or 2
+	if eyes <= 0 then return false end
+	head.eyes = eyes - 1
+
+	local H = Health()
+	if H and H.SendLimbUpdate then H.SendLimbUpdate(ply, "head", true) end
+	dbg("eye lost", ply, head.eyes)
+
+	return true
+end
+
 --- Feed one Z-City hit into WoundSystem.
 --- ply      living player (already resolved)
 --- rawDamage damage after armor/penetration, BEFORE Z-City's per-bone bullet multiplier (WoundSystem has its own)
@@ -163,6 +192,11 @@ function WB.ApplyDamage(ply, dmgInfo, bonename, hitgroup, rawDamage, onRagdoll)
 	end
 
 	dbg("damage", ply, limb, damage)
+
+	-- a bullet (any firearm) or a bladed Z-City melee weapon hitting the head: small chance to destroy an eye
+	if ply:Alive() and not dmgInfo:IsDamageType(DMG_BLAST) and dmgInfo:IsDamageType(DMG_BULLET + DMG_BUCKSHOT + DMG_SLASH) then
+		WB.EyeHit(ply, limb or (hitgroup and WB.HitgroupToWS[hitgroup]))
+	end
 
 	-- hit with a glass shard / broken bottle: pieces stay in the wound
 	local inf = dmgInfo:GetInflictor()
