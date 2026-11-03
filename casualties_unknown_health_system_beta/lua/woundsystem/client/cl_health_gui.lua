@@ -3862,9 +3862,7 @@ hook.Add("HUDPaint", "WoundDollAndPanel", function()
     local animProgress = math.Clamp((CurTime() - GUIState.openTime) / 0.2, 0, 1)
     local smoothProgress = 1 - math.pow(1 - animProgress, 3) 
     
-    SetGuiMaterial(mats.woundbg)
-    surface.SetDrawColor(255, 255, 255, math.Clamp(animProgress * 2, 0, 1) * 150)
-    DrawRectInt(0, 0, ScrW(), ScrH())
+    -- (the dark full-screen backdrop of the wound view was removed)
 
     ClearHudScratch()
     local limbShakes = GUIState.HudLimbShakeScratch
