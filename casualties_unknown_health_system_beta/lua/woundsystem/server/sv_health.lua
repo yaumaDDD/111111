@@ -85,6 +85,8 @@ if WoundSystem.PoolNetStrings then
 end
 
 local Const = {}
+Const.FractureSetTimer = 95      -- boneHealTimer of a fracture after a bandage / splint set the bone (Z-City: 1 -> 0.95)
+Const.FractureHealSeconds = 240 -- Z-City: the bone recovers by 1/240 per second
 local Fn = {}
 local PlayerLimbs
 local BodyState
@@ -780,6 +782,17 @@ Const.DrugEffectAliases = {
 function Fn.AddClampedNumber(target, key, amount, fraction, clamps)
     if type(target) ~= "table" or type(amount) ~= "number" then return end
 
+    -- items do not reduce a dislocation (only the reduction minigame does)
+    if key == "dislocationTimer" and target.dislocated then return end
+
+    -- a fracture: any bandage / dressing sets the bone (Z-City: bone 1 -> 0.95), the recovery itself runs on the Z-City timer
+    if key == "boneHealTimer" then
+        if target.broken and amount < 0 then
+            target.boneHealTimer = math.min(tonumber(target.boneHealTimer) or 100, Const.FractureSetTimer)
+        end
+        return
+    end
+
     local current = tonumber(target[key]) or 0
     local nextValue = current + amount * (tonumber(fraction) or 1)
     local clamp = clamps and clamps[key]
@@ -938,16 +951,6 @@ local function ApplyBandageProfile(ctx, profile)
     Fn.ApplyNumericEffects(ctx.body, profile.bodyEffects, effectFraction, Const.BodyEffectClamps)
     ApplyStatusList(ctx, profile.setStatuses, true)
     ApplyStatusList(ctx, profile.clearStatuses, false)
-
-    if ctx.limb.broken and profile.effects and profile.effects.boneHealTimer and (ctx.limb.boneHealTimer or 0) <= 0 then
-        ctx.limb.broken = false
-        ctx.limb.boneHealTimer = 0
-    end
-
-    if ctx.limb.dislocated and profile.effects and profile.effects.dislocationTimer and (ctx.limb.dislocationTimer or 0) <= 0 then
-        ctx.limb.dislocated = false
-        ctx.limb.dislocationTimer = 0
-    end
 
     if profile.bandagedAtSlow or profile.bandagedAtBleed then
         local slowOk = profile.bandagedAtSlow and (ctx.limb.bandageSlowAmount or 0) >= profile.bandagedAtSlow
@@ -6877,20 +6880,20 @@ local function LimbPhysiologyTick(dt)
                 state.skin = math.Clamp((state.skin or 100) + (0.5 * dt), 0, 100)
             end
 
-            if state.dislocated then
-                local splintMult = state.splinted and 2 or 1
-                state.dislocationTimer = math.max(0, state.dislocationTimer - (dt * WoundSystem.Health.Config.CvFloat(WoundSystem.Health.Config.CVars.DislocationHealSpeed, 0.07) * limbHealingMult * splintMult))
-                if state.dislocationTimer <= 0 then
-                    state.dislocated = false
-                    state.dislocationTimer = 0
-                end
-            else
+            -- a dislocation never heals by itself (no timer, no medicine, no splint): only the reduction minigame puts the joint back
+            if not state.dislocated then
                 state.dislocationTimer = 0
             end
 
             if state.broken then
-                local splintMult = state.splinted and 2.5 or 1
-                state.boneHealTimer = math.max(0, state.boneHealTimer - (dt * WoundSystem.Health.Config.CvFloat(WoundSystem.Health.Config.CVars.BoneHealSpeed, 0.043) * limbHealingMult * splintMult))
+                -- Z-City fracture: it does not heal by itself (timer 100 = untreated). A bandage or a splint sets the bone
+                -- (timer 95), then it recovers on the Z-City timer: 1/240 of the bone per second (~228 s)
+                if state.splinted then
+                    state.boneHealTimer = math.min(state.boneHealTimer or 100, Const.FractureSetTimer)
+                end
+                if (state.boneHealTimer or 100) <= Const.FractureSetTimer then
+                    state.boneHealTimer = math.max(0, state.boneHealTimer - (dt * 100 / Const.FractureHealSeconds))
+                end
                 if state.boneHealTimer <= 0 then
                     state.broken = false
                     state.boneHealTimer = 0

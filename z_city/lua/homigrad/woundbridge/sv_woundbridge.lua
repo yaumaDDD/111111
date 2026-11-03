@@ -350,6 +350,15 @@ end
 local armL, armR = {"arm_L", "forearm_L", "hand_L"}, {"arm_R", "forearm_R", "hand_R"}
 local legL, legR = {"thigh_L", "crus_L", "foot_L"}, {"thigh_R", "crus_R", "foot_R"}
 
+--- a fracture nobody set yet (Z-City bone = 1): the shadow organism shows it as 1 so the Z-City bandage code accepts the patient
+local function AnyUnsetFracture(limbs, names)
+	for _, id in ipairs(names) do
+		local l = limbs[id]
+		if type(l) == "table" and l.broken and not l.dismembered and (tonumber(l.boneHealTimer) or 100) > 95 then return true end
+	end
+	return false
+end
+
 local function AnyDislocated(limbs, names)
 	for _, id in ipairs(names) do
 		local l = limbs[id]
@@ -409,10 +418,10 @@ function WB.Sync(ply, org)
 
 	-- limbs: show WoundSystem limb strength to the Z-City code that reads org.larm/lleg (aim sway, limp...)
 	if limbs then
-		org.larm = 1 - Strength(H, ply, armL)
-		org.rarm = 1 - Strength(H, ply, armR)
-		org.lleg = 1 - Strength(H, ply, legL)
-		org.rleg = 1 - Strength(H, ply, legR)
+		org.larm = AnyUnsetFracture(limbs, armL) and 1 or 1 - Strength(H, ply, armL)
+		org.rarm = AnyUnsetFracture(limbs, armR) and 1 or 1 - Strength(H, ply, armR)
+		org.lleg = AnyUnsetFracture(limbs, legL) and 1 or 1 - Strength(H, ply, legL)
+		org.rleg = AnyUnsetFracture(limbs, legR) and 1 or 1 - Strength(H, ply, legR)
 
 		local la = not (LimbAlive(limbs, "forearm_L") and LimbAlive(limbs, "arm_L"))
 		local ra = not (LimbAlive(limbs, "forearm_R") and LimbAlive(limbs, "arm_R"))
@@ -432,7 +441,8 @@ function WB.Sync(ply, org)
 
 	-- legacy organ hits (bullet trace through the Z-City organs) must not leave anything that Z-City reads as its own health
 	org.spine1, org.spine2, org.spine3 = 0, 0, 0
-	org.pelvis, org.skull, org.chest = 0, 0, 0
+	org.pelvis, org.skull = 0, 0
+	org.chest = (limbs and AnyUnsetFracture(limbs, {"thorax"})) and 1 or 0
 	-- dislocations: the Z-City flags (radial "Fix dislocation", movement, pain, ragdoll arms) follow the C:U limbs
 	local dl, dr, al, ar = false, false, false, false
 	if limbs then
@@ -1116,8 +1126,10 @@ local function BestLimb(ply, spec, preferred)
 		if spec.kind == "bandage" and state.isBandaged then continue end
 		if spec.pick == "extremity" and state.tourniqueted then continue end
 
-		local score = (state.bleed or 0) + ((id == preferred) and 1000 or 0)
-		if (state.bleed or 0) > 0.1 and score > best then
+		-- an unset fracture also wants a bandage (Z-City: the bandage sets the bone)
+		local fracture = spec.kind == "bandage" and state.broken and (state.boneHealTimer or 100) > 95
+		local score = (state.bleed or 0) + (fracture and 0.2 or 0) + ((id == preferred) and 1000 or 0)
+		if ((state.bleed or 0) > 0.1 or fracture) and score > best then
 			bestId, best = id, score
 		end
 	end
@@ -1474,7 +1486,8 @@ function WB.StartHud(ply, kind, limbId)
 	if kind == "bandage" then
 		-- only where something bleeds (a bandage over shrapnel / glass is allowed: it will infect, see WoundSystem)
 		if l.isBandaged then return false end
-		if (tonumber(l.bleed) or 0) <= 0.1 and (tonumber(l.shrapnel) or 0) <= 0 then return false end
+		if (tonumber(l.bleed) or 0) <= 0.1 and (tonumber(l.shrapnel) or 0) <= 0
+			and not (l.broken and (tonumber(l.boneHealTimer) or 100) > 95) then return false end
 
 		local best, bestSpec, bestIdx, bestRank
 		for _, w in ipairs(ply:GetWeapons()) do

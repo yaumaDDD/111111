@@ -1831,7 +1831,6 @@ local function BandageEffectsCanTreat(state, effects, bodyEffects)
         if (key == "infection" or key == "infectionAmount" or key == "infectionSpeed") and amount < 0 and ((state.infection or 0) > 0 or (state.infectionSpeed or 0) > 0) then return true end
         if key == "disinfectTime" and amount > 0 then return true end
         if key == "boneHealTimer" and amount < 0 and state.broken then return true end
-        if key == "dislocationTimer" and amount < 0 and state.dislocated then return true end
         if key == "furBloodAmount" and amount < 0 and (state.furBloodAmount or 0) > 0 then return true end
     end
 
@@ -3641,8 +3640,8 @@ function WoundSystem.HealthGUI.LimbActions(state)
 
     if state.isBandaged then
         list[#list + 1] = "UNBANDAGE"
-    elseif ((tonumber(state.bleed) or 0) > 0.1 or shrapnel) and WoundSystem.HealthGUI.HasBandageItem() then
-        list[#list + 1] = "BANDAGE" -- only where something bleeds (a bandage over shrapnel / glass is allowed too)
+    elseif ((tonumber(state.bleed) or 0) > 0.1 or shrapnel or (state.broken and (tonumber(state.boneHealTimer) or 100) > 95)) and WoundSystem.HealthGUI.HasBandageItem() then
+        list[#list + 1] = "BANDAGE" -- where something bleeds, or an unset fracture (a bandage over shrapnel / glass is allowed too)
     end
 
     return list
