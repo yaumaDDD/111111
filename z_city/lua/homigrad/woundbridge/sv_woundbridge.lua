@@ -35,6 +35,20 @@ WB.cvEyeChance = WB.cvEyeChance or (ConVarExists("zc_wound_eye_chance") and GetC
 WB.cvDebug = WB.cvDebug or (ConVarExists("zc_woundsystem_bridge_debug") and GetConVar("zc_woundsystem_bridge_debug")
 	or CreateConVar("zc_woundsystem_bridge_debug", "0", FCVAR_ARCHIVE, "Print bridge debug output", 0, 1))
 
+-- height (Source units) of a fall from which the legs start to get hurt (dislocation begins, a bit higher it is a fracture).
+-- 330 u is about the 3rd balcony of a city block (~6 m). Landing speed = sqrt(2 * sv_gravity * height).
+WB.cvFallHeight = WB.cvFallHeight or (ConVarExists("zc_fall_injury_height") and GetConVar("zc_fall_injury_height")
+	or CreateConVar("zc_fall_injury_height", "330", FCVAR_ARCHIVE,
+		"Fall height (Source units, 52 u = 1 m) from which a landing dislocates / breaks the legs; ~330 = 3rd balcony", 60, 5000))
+
+--- Landing speeds: `safe` = nothing happens up to it, `injury` = bone damage 0.7 (dislocation starts), a bit above it a fracture
+function WB.FallSpeeds()
+	local g = GetConVar("sv_gravity") and GetConVar("sv_gravity"):GetFloat() or 600
+	local injury = math.sqrt(2 * math.max(g, 1) * WB.cvFallHeight:GetFloat())
+	local safe = math.min(526.5, injury * 0.85)
+	return safe, injury
+end
+
 local function dbg(...)
 	if WB.cvDebug:GetBool() then print("[ZC<->WoundSystem]", ...) end
 end
@@ -503,13 +517,18 @@ function WB.LandingHit(ply, inWater, onFloater, speed)
 	if IsValid(rag) and rag:GetCreationTime() < CurTime() - 0.2 then return end -- really in a ragdoll already
 
 	speed = tonumber(speed) or 0
-	if speed <= 526.5 then return end
+	local safe, injury = WB.FallSpeeds()
+	dbg("landing", ply, nil, "speed " .. math.floor(speed) .. " (injury from " .. math.floor(injury) .. ")")
+	if speed <= safe then return end
 
 	ply._wbFallHookAt = CurTime()
-	dbg("landing", ply, nil, speed)
+	-- hand the exact landing speed to WoundSystem (its own hook may run later in the same tick)
+	ply._woundSystemLastFallSpeed = speed
+	ply._woundSystemLastFallSpeedTime = CurTime()
+	ply._woundSystemLastFallOnFloater = false
 
 	local dmg = DamageInfo()
-	dmg:SetDamage((speed - 526.5) / 3.96) -- the inverse of WoundSystem's GetRecentFallSpeed(dmg)
+	dmg:SetDamage(math.max((speed - 526.5) / 3.96, 0.01))
 	dmg:SetDamageType(DMG_FALL)
 	dmg:SetAttacker(game.GetWorld())
 	dmg:SetInflictor(game.GetWorld())

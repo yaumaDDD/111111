@@ -6365,8 +6365,11 @@ WoundSystem.Health.HandleDamage = function(ent, dmginfo)
         end
 
         -- Z-City: a landing hurts the legs only through the bone (sv_bone.lua legs()); no blood.
-        -- bone damage 0 at the safe landing speed (526.5), 0.7 = dislocation, 1 = fracture at ~900 u/s (a fall of ~11 m)
-        fallBone = math.max((fallSpeed - 526.5) / 373, 0)
+        -- bone damage 0 at the safe landing speed, 0.7 = dislocation, 1 = fracture (thresholds: hg.WoundBridge.FallSpeeds)
+        local fallSafe, fallInjury = 526.5, 630
+        if hg and hg.WoundBridge and hg.WoundBridge.FallSpeeds then fallSafe, fallInjury = hg.WoundBridge.FallSpeeds() end
+        -- 0.7 (dislocation) exactly at `fallInjury` (zc_fall_injury_height), 1.0 (fracture) a bit above it
+        fallBone = math.max((fallSpeed - fallSafe) / math.max(fallInjury - fallSafe, 1) * 0.7, 0)
         -- one leg bone per side (shin or foot)
         affectedLimbs = {(math.random(3) == 1) and "foot_L" or "crus_L", (math.random(3) == 1) and "foot_R" or "crus_R"}
 
