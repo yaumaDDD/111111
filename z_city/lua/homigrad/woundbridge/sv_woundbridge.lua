@@ -513,8 +513,13 @@ function WB.LandingHit(ply, inWater, onFloater, speed)
 	if not IsValid(ply) or not ply:IsPlayer() or not ply:Alive() then return end
 	if inWater or onFloater or not WB.IsBridged(ply) then return end
 
+	if (ply._wbFallHookAt or 0) > CurTime() - 0.3 then return end -- this landing was already handled (engine hook / tracker)
+
 	local rag = ply.FakeRagdoll
-	if IsValid(rag) and rag:GetCreationTime() < CurTime() - 0.2 then return end -- really in a ragdoll already
+	if IsValid(rag) and rag:GetCreationTime() < CurTime() - 0.2 then
+		dbg("landing ignored: already in a ragdoll", ply, nil, "speed " .. math.floor(tonumber(speed) or 0))
+		return -- really in a ragdoll already
+	end
 
 	speed = tonumber(speed) or 0
 	local safe, injury = WB.FallSpeeds()
@@ -534,6 +539,33 @@ function WB.LandingHit(ply, inWater, onFloater, speed)
 	dmg:SetInflictor(game.GetWorld())
 	WB.ApplyDamage(ply, dmg, nil, nil, dmg:GetDamage(), false)
 end
+
+--- Own landing detector: the engine hook is not reliable (hook order, other addons that return a value from it, noclip -> walk
+--- switch ...), so the fall speed is also tracked from the player's velocity. Whichever notices the landing first handles it.
+hook.Add("Move", "ZCity_WoundBridge_FallTrack", function(ply, mv)
+	if not IsValid(ply) or not ply:Alive() then return end
+
+	local air = (not ply:IsOnGround()) and ply:GetMoveType() == MOVETYPE_WALK and not IsValid(ply.FakeRagdoll)
+		and ply:WaterLevel() < 2 and not ply:InVehicle()
+	if air then
+		local vz = -mv:GetVelocity().z
+		if vz > (ply._wbAirSpeed or 0) then ply._wbAirSpeed = vz end
+		ply._wbWasAir = true
+		return
+	end
+
+	if ply._wbWasAir then
+		local speed = ply._wbAirSpeed or 0
+		ply._wbWasAir = nil
+		ply._wbAirSpeed = nil
+		if ply:IsOnGround() and speed > 300 then
+			dbg("tracker landing", ply, nil, "speed " .. math.floor(speed))
+			WB.LandingHit(ply, false, false, speed)
+		end
+	else
+		ply._wbAirSpeed = nil
+	end
+end)
 
 hook.Add("OnPlayerHitGround", "ZCity_WoundBridge_Fall", function(ply, inWater, onFloater, speed)
 	WB.LandingHit(ply, inWater, onFloater, speed)
