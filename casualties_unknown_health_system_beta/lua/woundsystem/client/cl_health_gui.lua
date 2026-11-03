@@ -3650,7 +3650,14 @@ function WoundSystemDrawLimbActionPoint(limbId, state, pointPos, bX, bY, scale, 
 
     if pointCfg.TextEnabled ~= false then
         local textColor = minigameActive and (pointCfg.TextActiveColor or Color(86, 221, 132, 120)) or (hoveringPoint and (pointCfg.TextHoverColor or Color(86, 255, 162, 255)) or (pointCfg.TextColor or Color(47, 224, 129, 255)))
-        draw.SimpleText(actionCfg.Text or pointCfg.Text or "REMOVE SHRAPNEL", actionCfg.TextFont or pointCfg.TextFont or "CrunchyTechFont", pointCenterX + ((actionCfg.TextOffsetX or pointCfg.TextOffsetX or 38) * scale), pointCenterY + ((actionCfg.TextOffsetY or pointCfg.TextOffsetY or -7) * scale), textColor, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+        local labelText = actionCfg.Text or pointCfg.Text or "REMOVE SHRAPNEL"
+        if actionStatus == "DISLOCATION" then
+            -- where the dislocation is: the joint of this limb
+            local joints = {thigh = "HIP", crus = "KNEE", foot = "ANKLE", arm = "SHOULDER", forearm = "ELBOW", hand = "WRIST"}
+            local joint = joints[string.match(tostring(limbId), "^(%a+)_") or ""]
+            if joint then labelText = labelText .. " - " .. joint end
+        end
+        draw.SimpleText(labelText, actionCfg.TextFont or pointCfg.TextFont or "CrunchyTechFont", pointCenterX + ((actionCfg.TextOffsetX or pointCfg.TextOffsetX or 38) * scale), pointCenterY + ((actionCfg.TextOffsetY or pointCfg.TextOffsetY or -7) * scale), textColor, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
     end
 
     if hoveringPoint then

@@ -4875,6 +4875,21 @@ net.Receive("WoundSystem_ShrapnelInput", function(_, ply)
     SendShrapnelState(ply, session)
 end)
 
+-- Dislocations are reduced by hand (no item), like in Z-City: the joint group of one side (leg / arm) is checked for the
+-- dislocation, the reduction minigame runs on the dislocated joint, the result of the reduction is rolled by the bridge.
+Fn.DislocationGroups = {
+    {"thigh_L", "crus_L", "foot_L"}, {"thigh_R", "crus_R", "foot_R"},
+    {"arm_L", "forearm_L", "hand_L"}, {"arm_R", "forearm_R", "hand_R"}
+}
+
+function Fn.DislocationGroupOf(limbId)
+    for _, group in ipairs(Fn.DislocationGroups) do
+        for _, id in ipairs(group) do
+            if id == limbId then return group end
+        end
+    end
+end
+
 local function BuildDislocationSession(limbId, dislocationTimer, hasWrench)
     local finishX = WoundSystem.Health.Constants.DislocationFinishX
     local finishY = WoundSystem.Health.Constants.DislocationFinishY
@@ -4961,6 +4976,23 @@ net.Receive("WoundSystem_DislocationStart", function(_, ply)
         end
     end
 
+    -- where is the dislocation: the clicked joint, otherwise the first dislocated joint of the same side group
+    local group = Fn.DislocationGroupOf(limbId)
+    if not group then return end
+
+    local state = GetLimbState(ply, limbId)
+    if not state or not state.dislocated then
+        limbId = nil
+        for _, id in ipairs(group) do
+            local groupState = GetLimbState(ply, id)
+            if groupState and groupState.dislocated and not groupState.dismembered then
+                limbId, state = id, groupState
+                break
+            end
+        end
+        if not limbId then return end
+    end
+
     local existing = Sessions.Dislocation[ply]
     if existing then
         if existing.limbId == limbId then
@@ -4970,10 +5002,7 @@ net.Receive("WoundSystem_DislocationStart", function(_, ply)
         CloseDislocationSession(ply, "replaced")
     end
 
-    local state = GetLimbState(ply, limbId)
-    if not state or not state.dislocated then return end
-
-    local hasWrench = DislocationItemHasWrench(ply, slotIdx)
+    local hasWrench = false -- by hand, no item needed
     local session = BuildDislocationSession(limbId, state.dislocationTimer or 100, hasWrench)
     Sessions.Dislocation[ply] = session
     SendDislocationOpen(ply, session)
@@ -5154,6 +5183,15 @@ net.Receive("WoundSystem_DislocationInput", function(_, ply)
     state.dislocationTimer = session.dislocationTimer
 
     if session.dislocationTimer < WoundSystem.Health.Constants.DislocationSuccessTimer then
+        -- the bone is back in place: the bridge (Z-City) rolls whether the joint really stays reduced
+        if hook.Run("WoundSystem_DislocationReduce", ply, session.limbId, state) == true then
+            session.dislocationTimer = state.dislocated and (state.dislocationTimer or 100) or 0
+            SendLimbUpdate(ply, session.limbId, true)
+            SendDislocationState(ply, session)
+            CloseDislocationSession(ply, "complete")
+            return
+        end
+
         state.dislocated = false
         state.dislocationTimer = 0
         session.dislocationTimer = 0

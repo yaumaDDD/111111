@@ -600,6 +600,33 @@ function WB.FixDislocation(fixer, args)
 	return true
 end
 
+--- WoundSystem dislocation minigame (wound view, by hand): the bone was put back in the minigame, now the Z-City roll
+--- (tries, pain, analgesia, doctor, crouching) decides whether the joint (all dislocated joints of this side) stays reduced.
+hook.Add("WoundSystem_DislocationReduce", "ZCity_WoundBridge_Dislocation", function(ply, limbId)
+	if not WB.IsBridged(ply) then return end
+
+	local limbs = WB.GetLimbs(ply)
+	if not limbs then return end
+
+	for _, groups in pairs(DISLOC_GROUPS) do
+		for _, names in ipairs(groups) do
+			for _, id in ipairs(names) do
+				if id == limbId then
+					FixDislocatedGroup(ply, names, ply)
+
+					local l = limbs[limbId]
+					if type(l) == "table" and l.dislocated then
+						l.dislocationTimer = 100 -- failed: the joint popped out again
+						local H = Health()
+						if H and H.SendLimbUpdate then H.SendLimbUpdate(ply, limbId, true) end
+					end
+					return true
+				end
+			end
+		end
+	end
+end)
+
 -----------------------------------------------------------------------------------------------------------------------
 -- BLOOD  (WoundSystem limb bleeding -> Z-City wounds / arterial wounds)
 --
