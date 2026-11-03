@@ -46,7 +46,6 @@ local clientFiles = {
     "woundsystem/client/cl_screen_effect_shaders.lua",
     "woundsystem/client/cl_blood_ui.lua",
     "woundsystem/client/cl_brain_effects.lua",
-    "woundsystem/client/cl_moodles.lua",
     "woundsystem/client/cl_options.lua",
     "woundsystem/client/cl_sound_manager.lua"
 }

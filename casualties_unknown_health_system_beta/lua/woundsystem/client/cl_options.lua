@@ -54,21 +54,6 @@ local CLIENT_PRESET_CVARS = {
     "woundsys_pain_shader_enabled",
     "woundsys_pain_shader_strength",
     "woundsys_pain_shader_distortion",
-    "woundsys_moodles_enabled",
-    "woundsys_moodles_scale",
-    "woundsys_moodles_icon_size",
-    "woundsys_moodles_gap",
-    "woundsys_moodles_columns",
-    "woundsys_moodles_offset_x",
-    "woundsys_moodles_offset_y",
-    "woundsys_moodles_anchor",
-    "woundsys_moodles_always_show_side",
-    "woundsys_moodles_side_on_cursor",
-    "woundsys_moodles_max_main",
-    "woundsys_moodles_update_rate",
-    "woundsys_moodles_tooltips",
-    "woundsys_moodles_medical_chip",
-    "woundsys_moodles_disabled",
     "woundsys_audio_master",
     "woundsys_blood_color",
     "woundsys_blood_r",
@@ -293,22 +278,6 @@ local function BuildClientPanel(panel)
     panel:CheckBox("Voice mouth movement", "woundsys_face_voice_mouth")
     panel:NumSlider("Face update distance", "woundsys_face_expression_distance", 256, 6000, 0)
 
-    AddHelp(panel, "Symptom moodles. Anchor accepts topleft, topright, bottomleft, bottomright, centerleft, or centerright. Disable entries with comma-separated moodle ids.")
-    panel:CheckBox("Moodles enabled", "woundsys_moodles_enabled")
-    panel:CheckBox("Show chip-gated diagnostics", "woundsys_moodles_medical_chip")
-    panel:NumSlider("Moodle scale", "woundsys_moodles_scale", 0.4, 3, 2)
-    panel:NumSlider("Moodle icon size", "woundsys_moodles_icon_size", 24, 128, 0)
-    panel:NumSlider("Moodle gap", "woundsys_moodles_gap", 0, 64, 0)
-    panel:NumSlider("Moodle columns", "woundsys_moodles_columns", 1, 32, 0)
-    panel:NumSlider("Moodle offset X", "woundsys_moodles_offset_x", -600, 600, 0)
-    panel:NumSlider("Moodle offset Y", "woundsys_moodles_offset_y", -600, 600, 0)
-    panel:TextEntry("Moodle anchor", "woundsys_moodles_anchor")
-    panel:CheckBox("Always show side moodles", "woundsys_moodles_always_show_side")
-    panel:CheckBox("Show side moodles while cursor visible", "woundsys_moodles_side_on_cursor")
-    panel:NumSlider("Max main moodles", "woundsys_moodles_max_main", 1, 40, 0)
-    panel:NumSlider("Moodle update seconds", "woundsys_moodles_update_rate", 0.1, 5, 1)
-    panel:CheckBox("Moodle tooltips", "woundsys_moodles_tooltips")
-    panel:TextEntry("Disabled moodle ids", "woundsys_moodles_disabled")
 
     AddHelp(panel, "Minigame invisible clip border.")
     panel:CheckBox("Clip minigame visuals", "woundsys_minigame_clip_enabled")

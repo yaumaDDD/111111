@@ -3447,103 +3447,7 @@ hook.Add("PostDrawHUD", "zz_WoundSystem_UnconsciousCircleForeground", DrawUncons
 -- ==========================================
 -- All tunables live here — change size, position,
 -- timing, and colours without touching the logic.
-local CriticalPanelConfig = {
-    -- Anchor position as a fraction of screen size
-    -- (0 = top/left edge, 0.5 = center, 1 = bottom/right edge)
-    AnchorX       = 0.5,    -- Centered horizontally
-    AnchorY       = 0.92,   -- 75% down (halfway between middle and bottom)
-
-    -- Panel image dimensions (pixels at 1080p — auto-scaled)
-    PanelWidth    = 320,
-    PanelHeight   = 80,
-
-    -- Text vertical nudge from the panel's center (positive = down)
-    TextOffsetY   = -1,
-
-    -- Spacing between the two text lines (scaled with resolution)
-    LineGap       = -2,
-
-    -- Flash / swap timing (seconds)
-    -- Full cycle = (FlashOn + FlashOff) * 2 = 1.0 s
-    --   0.00–0.25  message A visible
-    --   0.25–0.50  hidden
-    --   0.50–0.75  message B visible
-    --   0.75–1.00  hidden
-    FlashOn       = 0.15,
-    FlashOff      = 0.15,
-
-    -- Appearance
-    Font          = "TechScannerFont",
-    TextColor     = Color(255, 86, 106),
-    PanelColor    = Color(255, 255, 255, 255),
-}
-
-local CriticalAlertMessages = {
-    {"VITAL SIGNS", "CRITICAL"},
-    {"TERMINATION", "IMMINENT"},
-    {"SEEK MEDICAL", "ATTENTION"}
-}
-
-local function IsCasStyleCriticallyDying(cardio)
-    cardio = cardio or CardioState
-
-    local head = PlayerLimbs and PlayerLimbs.head
-    local headMuscle = head and (head.muscle or head.muscleHealth or 100) or 100
-
-    return ((cardio.totalBleedSpeed or 0) > 0.02 and (cardio.bloodVolume or 100) < 30)
-        or (cardio.bloodOxygen or 100) < 50
-        or ((cardio.hunger or 100) < 0 and headMuscle < 25)
-        or (cardio.septicShock or 0) > 82.5
-        or (cardio.temperature or 37) < 27
-        or (cardio.temperature or 37) > 41.5
-        or (cardio.fibrillationProgress or 0) > 60
-        or (cardio.bloodPressure or 120) < 70
-end
-
-function WoundSystemDrawCriticalVitalsWarning()
-    local cardio = CardioState
-
-    local isCritical = IsCasStyleCriticallyDying(cardio)
-    if not isCritical then return end
-
-    if WoundSystemHealthHUDOpen and CurTime() >= (WoundSystemNextHealthPanelCriticalAlert or 0) then
-        WoundSystemNextHealthPanelCriticalAlert = CurTime() + 1.6
-    end
-
-    local cfg   = CriticalPanelConfig
-    local scale = (ScrH() / 1080) * UIScale()
-    local scrW, scrH = ScrW(), ScrH()
-
-    -- 2. Draw Background Panel (Always visible)
-    local panelW = cfg.PanelWidth  * scale
-    local panelH = cfg.PanelHeight * scale
-    local panelX = (scrW * cfg.AnchorX) - (panelW / 2)
-    local panelY = (scrH * cfg.AnchorY) - (panelH / 2)
-
-    SetGuiMaterial(Mat.criticalPiece)
-    surface.SetDrawColor(cfg.PanelColor)
-    DrawRectInt(panelX, panelY, panelW, panelH)
-
-    local isFlashVisible = math.sin(CurTime() * 20) > 0
-    local messageIdx = math.floor(CurTime()) % #CriticalAlertMessages + 1
-
-    if isFlashVisible then
-        local line1, line2 = CriticalAlertMessages[messageIdx][1], CriticalAlertMessages[messageIdx][2]
-
-        surface.SetFont(cfg.Font)
-        local _, fontH   = surface.GetTextSize("A")
-        local lineGap    = cfg.LineGap * scale
-        local totalTextH = (fontH * 2) + lineGap
-
-        local textCX = scrW * cfg.AnchorX
-        local textCY = (scrH * cfg.AnchorY) + (cfg.TextOffsetY * scale)
-        local startY = textCY - (totalTextH / 2)
-
-        draw.SimpleText(line1, cfg.Font, textCX, startY, cfg.TextColor, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
-        draw.SimpleText(line2, cfg.Font, textCX, startY + fontH + lineGap, cfg.TextColor, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
-    end
-end
-
+-- (the "VITAL SIGNS CRITICAL / TERMINATION IMMINENT" warning panel under the doll was removed)
 
 local function ClearHudScratch()
     for key in pairs(GUIState.HudLimbShakeScratch) do
@@ -4074,8 +3978,6 @@ hook.Add("HUDPaint", "WoundDollAndPanel", function()
 
     WoundSystemDrawQueuedTooltip(mx, my)
 
-    -- Draw critical vitals warning on top of everything
-    WoundSystemDrawCriticalVitalsWarning()
 end, HOOK_LOW)
 
 net.Receive("WoundSystem_UpdateCardio", function()
