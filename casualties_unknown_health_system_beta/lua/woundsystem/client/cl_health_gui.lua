@@ -1486,6 +1486,7 @@ WoundSystemActiveUISounds = WoundSystemActiveUISounds or {}
 WoundSystemNextUISound = WoundSystemNextUISound or {}
 
 local function PlayLoudUISound(soundPath, volume, minInterval)
+    do return end -- WoundSystem UI / alert sounds are removed (only the medical sounds of an applied item stay)
     soundPath = tostring(soundPath or "")
     if soundPath == "" then return end
 
@@ -2241,7 +2242,6 @@ hook.Add("Think", "ToggleHUDInput", function()
             if GUIState.hudOpen then 
                 GUIState.openTime = CurTime() 
                 WoundSystem.HealthGUI.SetScreenClickerOwned(true, "hud_toggle_open")
-                surface.PlaySound("woundon.ogg")
             else
                 if WoundSystemWorldDrag and WoundSystemWorldDrag.active then
                     WoundSystemCancelWorldItemDrag(false)
@@ -2299,7 +2299,6 @@ function WoundSystem.OpenHealthHUD()
     GUIState.openTime = CurTime()
     WoundSystemHealthHUDOpen = true
     WoundSystem.HealthGUI.SetScreenClickerOwned(true, "hud_toggle_open")
-    surface.PlaySound("woundon.ogg")
 end
 
 function WoundSystem.CloseHealthHUD()
@@ -2485,17 +2484,6 @@ local function UpdateAsystoleSound()
             ECG.asystoleSound = nil
         end
 
-        sound.PlayFile("sound/flatline.ogg", "noblock noplay 2d", function(station)
-            if IsValid(station) then
-                ECG.asystoleSound = station
-                local muffleVol, mufflePitch = GetHearingMuffle()
-                station:SetVolume(GetAsystoleVolume() * muffleVol)
-                station:SetPlaybackRate(mufflePitch / 100)
-                station:Play()
-            else
-                surface.PlaySound("flatline.ogg")
-            end
-        end)
     elseif not isAsystole then
         ECG.hasPlayedAsystoleSound = false
         if IsValid(ECG.asystoleSound) then
@@ -2612,10 +2600,7 @@ hook.Add("Think", "WoundSystem_CalculateECG", function()
                         heartSound = "heartthump-heavy-monitor.ogg"
                     end
 
-                    if vol > 0 then
-                        local muffleVol, mufflePitch = GetHearingMuffle()
-                        ply:EmitSound(heartSound, 75, math.Round(mufflePitch), vol * muffleVol, CHAN_AUTO)
-                    end
+                    -- (the heartbeat thump sound is removed)
                 end
             end
             ECG.lastBeatPhase = pixelHeartPhase
@@ -3516,7 +3501,6 @@ function WoundSystemDrawCriticalVitalsWarning()
 
     if WoundSystemHealthHUDOpen and CurTime() >= (WoundSystemNextHealthPanelCriticalAlert or 0) then
         WoundSystemNextHealthPanelCriticalAlert = CurTime() + 1.6
-        PlayLoudUISound("healthpanel-alert.ogg", 3.4, 1.55)
     end
 
     local cfg   = CriticalPanelConfig
@@ -4232,7 +4216,6 @@ function WoundSystemCancelWorldItemDrag(playSound)
     WoundSystem.HealthGUI.SetScreenClickerOwned(WoundSystemHealthHUDOpen, "world_drag_cancel")
 
     if playSound then
-        surface.PlaySound("click.ogg")
     end
 
     return true
@@ -4293,7 +4276,6 @@ function WoundSystemStartWorldItemDrag(ent, mouseButton, keyGrab)
     WoundSystemWorldDrag.keyGrab = keyGrab == true
     ent:SetNoDraw(true)
     WoundSystem.HealthGUI.SetScreenClickerOwned(true, "world_item_drag_start")
-    surface.PlaySound("miniclick.ogg")
     return true
 end
 

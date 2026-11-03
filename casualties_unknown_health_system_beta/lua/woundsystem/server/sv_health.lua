@@ -581,14 +581,7 @@ local function FinishBloodVomit(ply)
     hook.Run("WoundSystem_BloodVomitVisual", ply, body, pos, forward)
 
     local soundEnt = IsValid(sourceEnt) and sourceEnt or ply
-    soundEnt:EmitSound(math.random(1, 2) == 1 and "vomit1.ogg" or "vomit2a.ogg", 70, 100, 0.85)
-    if WoundSystem.TalkerSayLine then
-        timer.Simple(1.5, function()
-            if IsValid(ply) then
-                WoundSystem.TalkerSayLine(ply, "vomitblood", nil, true)
-            end
-        end)
-    end
+    soundEnt:EmitSound("vomit/vomit5.mp3") -- Z-City vomit sound
     SendCardioUpdate(ply)
 end
 
@@ -3895,7 +3888,7 @@ function Fn.EmitBulletHitSound(ent, dmginfo)
     local now = CurTime()
     if (ent._WoundSystemNextBulletHitSound or 0) > now then return end
     ent._WoundSystemNextBulletHitSound = now + 0.045
-    ent:EmitSound("bullethit.ogg", 70, 100, 0.8)
+    -- (the WoundSystem bullet hit sound is removed: Z-City plays its own)
 end
 
 function Fn.DamageBloodNormal(ent, pos, dmginfo)
@@ -4389,8 +4382,6 @@ function WoundSystem.Dismember(ply, limbName)
     if visualEnt == ply and WoundSystemBridgeActive() and IsValid(ply.FakeRagdoll) then
         visualEnt = ply.FakeRagdoll
     end
-
-    visualEnt:EmitSound("physics/flesh/flesh_squishy_impact_hard4.wav", 65, 90, 1)
 
     local gorePos = visualEnt:WorldSpaceCenter()
     Fn.ForEachDismembermentBone(visualEnt, limbName, function(boneIndex)
@@ -5466,7 +5457,6 @@ net.Receive("WoundSystem_SyringeInput", function(_, ply)
         state.shrapnel = math.max(tonumber(state.shrapnel) or 0, 1)
         state.pain = math.Clamp((state.pain or 0) + 20, 0, 100)
         SendLimbUpdate(ply, session.limbId, true)
-        ply:EmitSound("bullethit.ogg", 70, 100, 0.8)
         CloseSyringeSession(ply, "needle_break")
         return
     end

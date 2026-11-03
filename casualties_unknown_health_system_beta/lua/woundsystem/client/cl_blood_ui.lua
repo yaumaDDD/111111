@@ -16,28 +16,6 @@ local function WoundSystemClientEnabled()
     return true
 end
 
-net.Receive("WoundSystem_BloodVomit", function()
-    if not WoundSystemClientEnabled() then return end
-
-    sound.PlayFile("sound/bloodvomitwarning.ogg", "noblock noplay 2d", function(station)
-        if IsValid(station) then
-            station:SetVolume(3.6)
-            station:Play()
-        else
-            surface.PlaySound("bloodvomitwarning.ogg")
-        end
-    end)
-end)
-
-net.Receive("WoundSystem_VomitWarning", function()
-    if not WoundSystemClientEnabled() then return end
-
-    sound.PlayFile("sound/vomitwarning.ogg", "noblock noplay 2d", function(station)
-        if IsValid(station) then
-            station:SetVolume(2.4)
-            station:Play()
-        else
-            surface.PlaySound("vomitwarning.ogg")
-        end
-    end)
-end)
+-- the warning / gagging sounds of the WoundSystem vomit are removed (the vomit sound itself is the Z-City one, played by the server)
+net.Receive("WoundSystem_BloodVomit", function() end)
+net.Receive("WoundSystem_VomitWarning", function() end)

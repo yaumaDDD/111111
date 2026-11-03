@@ -114,7 +114,6 @@ net.Receive("WoundSystem_LobotomyEffect", function()
     effectActive = true
     effectStartTime = CurTime()
     needsCapture = true
-    surface.PlaySound(LobotomySoundPath())
 end)
 
 hook.Add("Think", "WoundSystem_BrainReverseClientState", function()

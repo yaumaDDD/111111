@@ -14,15 +14,7 @@ local function EnsureClientConVar(name, default, help, min, max)
     CreateClientConVar(name, tostring(default), true, false, help or "", min, max)
 end
 
-CreateClientConVar("woundsys_pain_sounds_enabled", "1", true, true, "Enable CAS-style pain vocalizations.", 0, 1)
-CreateClientConVar("woundsys_death_sounds_enabled", "1", true, true, "Enable death vocalization sounds.", 0, 1)
-CreateClientConVar("woundsys_growl_sounds_enabled", "1", true, true, "Enable unhappy growl sounds.", 0, 1)
 CreateClientConVar("woundsys_self_talk_enabled", "1", true, true, "Let your character automatically say quoted C:U-style self-talk lines in chat.", 0, 1)
-EnsureClientConVar("woundsys_music_enabled", "1", "Enable the CAS3-style WoundSystem music manager.", 0, 1)
-EnsureClientConVar("woundsys_music_volume", "0.45", "CAS3 music song volume.", 0, 1)
-EnsureClientConVar("woundsys_music_drone_volume", "1", "CAS3 medical drone volume.", 0, 1)
-EnsureClientConVar("woundsys_music_sadness_distortion", "1", "Approximate CAS3 sadness mixer distortion.", 0, 1)
-EnsureClientConVar("woundsys_tinnitus_volume", "1.0", "Volume multiplier for deafened tinnitus ringing SFX.", 0, 2)
 if not GetConVar("woundsys_face_expressions_enabled") then
     CreateClientConVar("woundsys_face_expressions_enabled", "1", true, false, "Enable WoundSystem flex-based facial expressions.", 0, 1)
 end
@@ -78,11 +70,6 @@ local CLIENT_PRESET_CVARS = {
     "woundsys_moodles_medical_chip",
     "woundsys_moodles_disabled",
     "woundsys_audio_master",
-    "woundsys_music_enabled",
-    "woundsys_music_volume",
-    "woundsys_music_drone_volume",
-    "woundsys_music_sadness_distortion",
-    "woundsys_tinnitus_volume",
     "woundsys_blood_color",
     "woundsys_blood_r",
     "woundsys_blood_g",
@@ -107,9 +94,6 @@ local CLIENT_PRESET_CVARS = {
     "woundsys_brain_delay_ms",
     "woundsys_brain_invert_controls",
     "woundsys_brain_reverse_flip",
-    "woundsys_pain_sounds_enabled",
-    "woundsys_death_sounds_enabled",
-    "woundsys_growl_sounds_enabled",
     "woundsys_face_expressions_enabled",
     "woundsys_face_voice_mouth",
     "woundsys_face_expression_distance",
@@ -137,8 +121,6 @@ local SERVER_OPTIONS = {
     {label = "Gunshot hearing radius", cvar = "woundsys_gunshot_hearing_radius", min = 0, max = 5000, decimals = 0},
     {label = "Gunshot hearing scale", cvar = "woundsys_gunshot_hearing_scale", min = 0, max = 10, decimals = 2},
     {label = "Replace vanilla blood", cvar = "woundsys_replace_vanilla_blood", kind = "bool"},
-    {label = "Server pain vocalizations", cvar = "woundsys_server_pain_sounds_enabled", kind = "bool"},
-    {label = "Server growls/whines/barking", cvar = "woundsys_server_growl_sounds_enabled", kind = "bool"},
     {label = "Limb force enabled", cvar = "woundsys_limb_force_enabled", kind = "bool"},
     {label = "Limb force movement scale", cvar = "woundsys_limb_force_movement_scale", min = 0, max = 2, decimals = 2},
     {label = "Limb force weapon threshold", cvar = "woundsys_limb_force_weapon_threshold", min = 0, max = 1, decimals = 2},
@@ -301,18 +283,10 @@ local function BuildClientPanel(panel)
     panel:CheckBox("Pain pixel shader", "woundsys_pain_shader_enabled")
     panel:NumSlider("Pain shader strength", "woundsys_pain_shader_strength", 0, 2, 2)
     panel:NumSlider("Pain shader distortion", "woundsys_pain_shader_distortion", 0, 2, 2)
-    panel:NumSlider("Medical audio loudness", "woundsys_audio_master", 0, 2, 2)
-    panel:CheckBox("CAS3 health audio", "woundsys_music_enabled")
-    panel:NumSlider("Dying/death cue volume", "woundsys_music_volume", 0, 1, 2)
-    panel:NumSlider("Drone volume", "woundsys_music_drone_volume", 0, 1, 2)
-    panel:CheckBox("Sadness audio distortion", "woundsys_music_sadness_distortion")
-    panel:NumSlider("Tinnitus SFX volume", "woundsys_tinnitus_volume", 0, 2, 2)
+    panel:NumSlider("Medical item sound loudness", "woundsys_audio_master", 0, 2, 2)
     AddKeyBinder(panel, "Wound view key", "woundsys_woundview_key", KEY_T or 20)
     AddKeyBinder(panel, "Self-use item key", "woundsys_bodyuse_key", KEY_F or 17)
     AddKeyBinder(panel, "World item grab key", "woundsys_worlditem_grab_key", KEY_E or 11)
-    panel:CheckBox("Enable pain vocalizations", "woundsys_pain_sounds_enabled")
-    panel:CheckBox("Enable death vocalizations", "woundsys_death_sounds_enabled")
-    panel:CheckBox("Enable unhappy growls", "woundsys_growl_sounds_enabled")
 
     AddHelp(panel, "Flex-based facial feedback for supported playermodels.")
     panel:CheckBox("Facial expressions", "woundsys_face_expressions_enabled")
