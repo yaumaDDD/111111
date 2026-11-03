@@ -30,7 +30,7 @@ local matWrenchIdle = Material(path .. "handWrenchIdle.png")
 local matWrenchClick = Material(path .. "handWrenchClick.png")
 
 local DEFAULT_CONFIG = {
-    Scale = 0.95,
+    Scale = 0.8,
     CenterOffsetX = 0,
     CenterOffsetY = 0,
 
@@ -179,6 +179,9 @@ end
 
 local function RebuildMetrics()
     local _, _, clipW, clipH = ClipRect()
+    -- the canvas is designed for a ~0.76 * screen height box: the fullscreen clip must not blow it up to the whole screen
+    local refSize = ScrH() * 0.76
+    clipW, clipH = math.min(clipW, refSize), math.min(clipH, refSize)
     MG.scale = math.min(clipW / 1500, clipH / 1100) * ConfigNumber("Scale", DEFAULT_CONFIG.Scale)
     MG.handDrawW = ConfigNumber("HandWidth", DEFAULT_CONFIG.HandWidth) * MG.scale * ConfigNumber("HandScale", DEFAULT_CONFIG.HandScale)
     MG.handDrawH = ConfigNumber("HandHeight", DEFAULT_CONFIG.HandHeight) * MG.scale * ConfigNumber("HandScale", DEFAULT_CONFIG.HandScale)

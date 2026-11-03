@@ -950,7 +950,7 @@ WoundSystemLimbUIConfig = {
         Width = 180,
         Height = 60,
         OffsetX = 0,
-        OffsetY = -60,
+        OffsetY = -34,
         HoverScale = 1,
         LerpSpeed = 4,
         Alpha = 255,
@@ -971,7 +971,7 @@ WoundSystemLimbUIConfig = {
                 Width = 180,
                 Height = 60,
                 OffsetX = 0,
-                OffsetY = -30,
+                OffsetY = -34,
                 TextOffsetX = -85,
                 TextOffsetY = -20
             },
@@ -981,7 +981,7 @@ WoundSystemLimbUIConfig = {
                 Width = 215,
                 Height = 60,
                 OffsetX = 0,
-                OffsetY = -60,
+                OffsetY = -34,
                 TextOffsetX = -103,
                 TextOffsetY = -20
             },
@@ -991,7 +991,7 @@ WoundSystemLimbUIConfig = {
                 Width = 170,
                 Height = 60,
                 OffsetX = 0,
-                OffsetY = -60,
+                OffsetY = -34,
                 TextOffsetX = -78,
                 TextOffsetY = -20
             },
@@ -1001,7 +1001,7 @@ WoundSystemLimbUIConfig = {
                 Width = 195,
                 Height = 60,
                 OffsetX = 0,
-                OffsetY = -60,
+                OffsetY = -34,
                 TextOffsetX = -92,
                 TextOffsetY = -20
             },
@@ -1011,7 +1011,7 @@ WoundSystemLimbUIConfig = {
                 Width = 195,
                 Height = 60,
                 OffsetX = 0,
-                OffsetY = -60,
+                OffsetY = -34,
                 TextOffsetX = -92,
                 TextOffsetY = -20
             },
@@ -1021,7 +1021,7 @@ WoundSystemLimbUIConfig = {
                 Width = 205,
                 Height = 60,
                 OffsetX = 0,
-                OffsetY = -60,
+                OffsetY = -34,
                 TextOffsetX = -98,
                 TextOffsetY = -20
             }
@@ -3670,7 +3670,7 @@ function WoundSystemDrawLimbActionRow(limbId, state, actionStatus, rowIndex, poi
     local pointCenterY = (actionButtonPos.y or targetCenterY) + (rowIndex * 84 * scale)
     local pointX = pointCenterX - (pointW * 0.5)
     local pointY = pointCenterY - (pointH * 0.5)
-    local pad = 14 * scale
+    local pad = 30 * scale
     local hoveringPoint = mx >= pointX - pad and mx <= (pointX + pointW + pad) and my >= pointY - pad and my <= (pointY + pointH + pad)
     if hoveringPoint then GUIState.actionPointHovered = true end
     local pointAlpha = minigameActive and (pointCfg.ActiveAlpha or 90) or (hoveringPoint and (pointCfg.HoverAlpha or 255) or (pointCfg.Alpha or 190))
@@ -4613,6 +4613,7 @@ hook.Add("RenderScreenspaceEffects", "WoundSystem_BlindEffects", function()
     DrawBloom(0, 0.3, 9, 9, 1, 1, 1, 1, 1)
 end, HOOK_HIGH)
 hook.Add("RenderScreenspaceEffects", "WoundSystem_ChromaticAberration", function()
+    local fxCv = GetConVar("woundsys_screen_effects") if not (fxCv and fxCv:GetBool()) then return end -- heavy full-screen effects are off by default (flicker with Z-City)
     if not WoundSystemClientEnabled() then return end
     if LowEndMode() then return end
     if WoundSystem.HealthGUI.IsSpawnVisualGraceActive and WoundSystem.HealthGUI.IsSpawnVisualGraceActive() then return end
@@ -4995,6 +4996,7 @@ end
 -- 1. POST-PROCESSING HOOK
 -- ==========================================
 hook.Add("RenderScreenspaceEffects", "WoundSystem_StaminaEffects", function()
+    local fxCv = GetConVar("woundsys_screen_effects") if not (fxCv and fxCv:GetBool()) then return end -- heavy full-screen effects are off by default (flicker with Z-City)
     if not WoundSystemClientEnabled() then return end
     if LowEndMode() then return end
     if WoundSystem.HealthGUI.IsSpawnVisualGraceActive and WoundSystem.HealthGUI.IsSpawnVisualGraceActive() then return end
@@ -5011,6 +5013,7 @@ hook.Add("RenderScreenspaceEffects", "WoundSystem_StaminaEffects", function()
 end)
 
 hook.Add("RenderScreenspaceEffects", "WoundSystem_PostProcess", function()
+    local fxCv = GetConVar("woundsys_screen_effects") if not (fxCv and fxCv:GetBool()) then return end -- heavy full-screen effects are off by default (flicker with Z-City)
     if not WoundSystemClientEnabled() then return end
     if LowEndMode() then return end
     if WoundSystem.HealthGUI.IsSpawnVisualGraceActive and WoundSystem.HealthGUI.IsSpawnVisualGraceActive() then

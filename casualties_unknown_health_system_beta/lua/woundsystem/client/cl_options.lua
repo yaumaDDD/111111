@@ -719,3 +719,7 @@ hook.Add("PopulateToolMenu", "WoundSystem_OptionsMenu", function()
     spawnmenu.AddToolMenuOption("Options", "doggo's addons", "WoundSystem_Server", "C:U Health System - Server", "", "", BuildServerPanel)
     spawnmenu.AddToolMenuOption("Options", "doggo's addons", "WoundSystem_AdminDebug", "C:U Health System - Admin Debug", "", "", BuildAdminDebugPanel)
 end)
+
+-- Full-screen post-process effects (pain / oxygen / blood-loss shader, colour modify, toy-town distortion, sharpen, motion blur,
+-- nausea camera roll). Off by default: together with the Z-City render hooks they made the first-person view flicker.
+CreateClientConVar("woundsys_screen_effects", "0", true, false, "Enable the WoundSystem full-screen post-process effects (pain shader, blur, camera roll). Screen vignettes stay on.", 0, 1)
