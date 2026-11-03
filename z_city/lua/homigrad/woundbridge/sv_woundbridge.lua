@@ -469,37 +469,44 @@ function WB.ApplyCollision(ply, speed, dot, massK, attacker, bonename, hitgroup,
 	return WB.ApplyImpact(ply, limb, WB.ImpactForce(ply, speed, dot, massK), surface)
 end
 
---- Fall of a standing player (engine DMG_FALL): the C:U fall model (landing speed -> impact force on feet / shins).
---- While in the fake ragdoll the landing is already counted by the ragdoll collisions.
+--- The landing of a standing player is processed from its real speed in WB.LandingHit (OnPlayerHitGround). The engine DMG_FALL
+--- damage only comes as a fallback: with mp_falldamage 0 it is a flat 10, and the order of the two events is not defined, so it is
+--- postponed by a moment and dropped if the landing hook did the job.
 function WB.ApplyFall(ply, dmgInfo)
 	if not WB.IsBridged(ply) then return false end
-	if IsValid(ply.FakeRagdoll) then return true end
 
-	-- the landing was already processed from its real speed (OnPlayerHitGround below): the engine damage is only a duplicate
-	-- (and with mp_falldamage 0 it is a flat 10 that says nothing about the height)
-	local now = CurTime()
-	if (ply._wbFallHookAt or 0) + 0.3 > now then return true end
-	ply._wbFallEngineAt = now
-	ply._wbFallEngineSpeed = dmgInfo:GetDamage() * 3.96 + 526.5
+	local engineDamage = dmgInfo:GetDamage()
+	local askedAt = CurTime()
+	timer.Simple(0.05, function()
+		if not IsValid(ply) or not ply:Alive() then return end
+		if (ply._wbFallHookAt or 0) >= askedAt - 0.3 then return end -- the landing hook has handled it
+		if IsValid(ply.FakeRagdoll) then return end -- ragdoll: the collisions are counted by WB.ApplyCollision
 
-	WB.ApplyDamage(ply, dmgInfo, nil, nil, dmgInfo:GetDamage(), false)
+		local dmg = DamageInfo()
+		dmg:SetDamage(engineDamage)
+		dmg:SetDamageType(DMG_FALL)
+		dmg:SetAttacker(game.GetWorld())
+		dmg:SetInflictor(game.GetWorld())
+		WB.ApplyDamage(ply, dmg, nil, nil, engineDamage, false)
+	end)
 	return true
 end
 
---- Landing of a standing player: the real landing speed (engine fall damage depends on mp_falldamage and can be a flat 10)
---- gives the fall damage that WoundSystem turns into leg bone damage (fracture / dislocation, no blood).
-hook.Add("OnPlayerHitGround", "ZCity_WoundBridge_Fall", function(ply, inWater, onFloater, speed)
+--- Landing of a standing player: the real landing speed gives the fall damage, WoundSystem turns it into leg bone damage
+--- (fracture / dislocation, no blood). Z-City's own `fallStun` hook may already have knocked the player into a ragdoll in the same
+--- tick (hg.LightStunPlayer is synchronous and the hook order is undefined), so a ragdoll made just now does not count as "in ragdoll".
+function WB.LandingHit(ply, inWater, onFloater, speed)
 	if not IsValid(ply) or not ply:IsPlayer() or not ply:Alive() then return end
 	if inWater or onFloater or not WB.IsBridged(ply) then return end
-	if IsValid(ply.FakeRagdoll) then return end
+
+	local rag = ply.FakeRagdoll
+	if IsValid(rag) and rag:GetCreationTime() < CurTime() - 0.2 then return end -- really in a ragdoll already
 
 	speed = tonumber(speed) or 0
 	if speed <= 526.5 then return end
 
-	local now = CurTime()
-	-- the engine damage came first and was at least as big: it has been processed already
-	if (ply._wbFallEngineAt or 0) + 0.3 > now and (ply._wbFallEngineSpeed or 0) >= speed - 40 then return end
-	ply._wbFallHookAt = now
+	ply._wbFallHookAt = CurTime()
+	dbg("landing", ply, nil, speed)
 
 	local dmg = DamageInfo()
 	dmg:SetDamage((speed - 526.5) / 3.96) -- the inverse of WoundSystem's GetRecentFallSpeed(dmg)
@@ -507,6 +514,10 @@ hook.Add("OnPlayerHitGround", "ZCity_WoundBridge_Fall", function(ply, inWater, o
 	dmg:SetAttacker(game.GetWorld())
 	dmg:SetInflictor(game.GetWorld())
 	WB.ApplyDamage(ply, dmg, nil, nil, dmg:GetDamage(), false)
+end
+
+hook.Add("OnPlayerHitGround", "ZCity_WoundBridge_Fall", function(ply, inWater, onFloater, speed)
+	WB.LandingHit(ply, inWater, onFloater, speed)
 end)
 
 --- Z-City legs(): a broken / dislocated leg stuns the player (hg.LightStunPlayer(owner, 2))
